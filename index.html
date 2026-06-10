@@ -151,6 +151,9 @@ html,body{
 .sport-card{display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:12px;border:1.5px solid #e5e7eb;cursor:pointer;transition:all .2s;background:#fff;font-size:11px;color:#666;text-align:center;}
 .sport-card .se{font-size:22px;}
 .sport-card.sel{background:#EEF2FF;border-color:#3B5BF6;color:#3B5BF6;font-weight:600;}
+.sport-card.locked{background:#f3f4f6;border-color:#e5e7eb;color:#bbb;cursor:not-allowed;opacity:.7;position:relative;}
+.sport-card.locked .se{filter:grayscale(1);opacity:.6;}
+.sport-card.locked::after{content:'已添加';position:absolute;top:3px;right:4px;font-size:8px;color:#aaa;font-weight:600;}
 .ob-text-row{display:flex;gap:8px;}
 .ob-text-input{flex:1;padding:9px 13px;background:#f8f9fc;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;}
 .ob-text-input:focus{border-color:#3B5BF6;}
@@ -354,12 +357,12 @@ const SPORT_QS = {
   basketball:[{q:'一般在哪里打篮球？',type:'text',ph:'如：奥森、国贸球场'},{q:'偏好几人制？',type:'chips',opts:['3V3','5V5','半场休闲','都行']},{q:'打球强度偏好？',type:'chips',opts:['休闲养生','认真竞技','野球随性']}],
   running:[{q:'一般在哪里跑步？',type:'text',ph:'如：奥森、护城河'},{q:'配速大概？',type:'chips',opts:['7分外','6-7分','5-6分','4-5分','按心率']},{q:'一般跑多少公里？',type:'chips',opts:['3-5km','5-10km','10-15km','半马+']}],
   fitness:[{q:'在哪个区域健身？',type:'text',ph:'如：望京、三里屯'},{q:'训练类型偏好？',type:'chips',opts:['力量训练','有氧为主','综合搭配']},{q:'需要搭子保护吗？',type:'chips',opts:['需要','不需要','大重量时需要']}],
-  skiing:[{q:'偏好哪个雪场？',type:'chips',opts:['崇礼系','东北系','新疆系','出境随缘']},{q:'雪道难度？',type:'chips',opts:['绿道','蓝道','红道','黑道+']},{q:'装备状况？',type:'chips',opts:['全套自有','部分自有','全部租借']},{q:'愿意过夜吗？',type:'chips',opts:['是','否','看情况']},{q:'愿意拼车吗？',type:'chips',opts:['是','否','看情况']}],
+  skiing:[{q:'偏好哪个雪场？',type:'chips',opts:['崇礼系','东北系','新疆系','出境随缘']},{q:'雪道难度？',type:'chips',opts:['绿道','蓝道','红道','黑道+']},{q:'装备状况？',type:'chips',opts:['全套自有','部分自有','全部租借']},{q:'需要住宿吗？是否拼住宿？',type:'chips',opts:['是','否','看情况']},{q:'愿意拼车吗？',type:'chips',opts:['是','否','看情况']}],
   pingpong:[{q:'在哪里打乒乓球？',type:'text',ph:'如：海淀球馆'},{q:'单打还是双打？',type:'chips',opts:['单打','双打','都可以']},{q:'水平？',type:'chips',opts:['新手','入门','进阶','高手']},{q:'需要教学局？',type:'chips',opts:['是','否','偶尔']}],
   football:[{q:'在哪里踢球？',type:'text',ph:'如：朝阳公园'},{q:'几人制？',type:'chips',opts:['5人制','7人制','11人制','都行']},{q:'位置偏好？',type:'chips',opts:['前锋','中场','后卫','门将','随意']},{q:'强度偏好？',type:'chips',opts:['养生随意','认真竞技']}],
   swimming:[{q:'在哪里游泳？',type:'text',ph:'如：国家游泳中心'},{q:'偏好泳道？',type:'chips',opts:['慢速道','中速道','快速道']},{q:'主要泳姿？',type:'chips',opts:['自由泳','蛙泳','蝶泳','背泳']},{q:'游泳目标？',type:'chips',opts:['打卡健身','提升技术','约练进阶']}],
   cycling:[{q:'主要骑行区域？',type:'text',ph:'如：延庆、妫水河'},{q:'常规骑行距离？',type:'chips',opts:['30km以内','30-60km','60-100km','100km+']},{q:'平均时速？',type:'chips',opts:['<20km/h','20-25km/h','25-30km/h','30+km/h']},{q:'装备类型？',type:'chips',opts:['竞技公路车','入门公路车','山地车','折叠车']},{q:'爬坡难度接受？',type:'chips',opts:['平路为主','小坡','中等爬坡','挑战爬坡']}],
-  hiking:[{q:'常去哪些路线？',type:'text',ph:'如：妙峰山、灵山'},{q:'能应对的难度？',type:'chips',opts:['入门级','中级','进阶','挑战级']},{q:'一般徒步多少公里？',type:'chips',opts:['5km以内','5-15km','15-25km','25km+']},{q:'愿意过夜露营？',type:'chips',opts:['是','否','偶尔']},{q:'强度偏好？',type:'chips',opts:['轻松游览','中强度','认真挑战']}],
+  hiking:[{q:'常去哪些路线？',type:'text',ph:'如：妙峰山、灵山'},{q:'能应对的难度？',type:'chips',opts:['入门级','中级','进阶','挑战级']},{q:'一般徒步多少公里？',type:'chips',opts:['5km以内','5-15km','15-25km','25km+']},{q:'愿意露营吗？',type:'chips',opts:['是','否','偶尔']},{q:'强度偏好？',type:'chips',opts:['轻松游览','中强度','认真挑战']}],
   volleyball:[{q:'在哪里打排球？',type:'text',ph:'如：海淀公园'},{q:'几人制？',type:'chips',opts:['沙滩2V2','4V4','6V6','都行']},{q:'水平？',type:'chips',opts:['新手','入门','进阶','高手']},{q:'强度偏好？',type:'chips',opts:['娱乐','竞技']}],
   pickleball:[{q:'在哪里打匹克球？',type:'text',ph:'如：朝阳、望京'},{q:'单打/双打？',type:'chips',opts:['单打','双打','都可以']},{q:'水平？',type:'chips',opts:['新手','入门','进阶','高手']},{q:'有固定场地？',type:'chips',opts:['有','没有','偶尔']}],
   bowling:[{q:'在哪个区域打保龄球？',type:'text',ph:'如：国贸、西单'},{q:'几人同玩？',type:'chips',opts:['2人','3-4人','5人+','随意']},{q:'打几局？',type:'chips',opts:['1-2局','3-4局','5局+','随意']},{q:'玩法偏好？',type:'chips',opts:['休闲娱乐','认真比赛']}],
@@ -466,8 +469,8 @@ const TECH_DIMS = {
       ask:'雪道我能滑「{my}」，你呢？', okMsg:'我「{their}」，同道没问题 ✅', gapMsg:'我「{their}」，差一档，能找重叠道。', conflictMsg:'我「{their}」，难度差到不能同道。'},
     {qIdx:2, label:'装备', type:'cat', flex:['部分自有'], critical:false,
       ask:'装备「{my}」，你呢？', okMsg:'我「{their}」，装备齐 ✅', flexMsg:'我「{their}」，可以拼凑 👍', conflictMsg:'我「{their}」，装备状态差距大。'},
-    {qIdx:3, label:'过夜意愿', type:'cat', flex:['看情况'], critical:true,
-      ask:'愿意过夜吗？我「{my}」', okMsg:'我「{their}」，节奏一样 ✅', flexMsg:'我「{their}」，灵活 👍', conflictMsg:'我「{their}」，过夜意愿冲突。'},
+    {qIdx:3, label:'住宿', type:'cat', flex:['看情况'], critical:true,
+      ask:'需要住宿/拼住宿吗？我「{my}」', okMsg:'我「{their}」，节奏一样 ✅', flexMsg:'我「{their}」，灵活 👍', conflictMsg:'我「{their}」，住宿需求冲突。'},
     {qIdx:4, label:'拼车', type:'cat', flex:['看情况'], critical:false,
       ask:'拼车呢？我「{my}」', okMsg:'我「{their}」，搭得了车 ✅', flexMsg:'我「{their}」 👍', conflictMsg:'我「{their}」，出行方式不一致。'},
   ],
@@ -510,8 +513,8 @@ const TECH_DIMS = {
       ask:'难度我能走「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」，差一档可调。', conflictMsg:'我「{their}」，难度差无法同行。'},
     {qIdx:2, label:'里程', type:'ord', order:['5km以内','5-15km','15-25km','25km+'], maxGap:1, critical:false,
       ask:'里程我走「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」，里程稍差。', conflictMsg:'我「{their}」，里程差过大。'},
-    {qIdx:3, label:'过夜露营', type:'cat', flex:['偶尔'], critical:true,
-      ask:'过夜露营我「{my}」', okMsg:'我「{their}」一致 ✅', flexMsg:'我「{their}」👍', conflictMsg:'我「{their}」，过夜意愿冲突。'},
+    {qIdx:3, label:'露营', type:'cat', flex:['偶尔'], critical:true,
+      ask:'露营我「{my}」', okMsg:'我「{their}」一致 ✅', flexMsg:'我「{their}」👍', conflictMsg:'我「{their}」，露营意愿冲突。'},
     {qIdx:4, label:'强度', type:'oppose', pairs:[['轻松游览','认真挑战']], critical:false,
       ask:'强度我「{my}」', okMsg:'我「{their}」一致 ✅', conflictMsg:'我「{their}」，强度差异大。'},
   ],
@@ -708,12 +711,12 @@ const SPORT_CRITERIA = {
   basketball:{hard:['时间','场馆','几人制','强度'],redLines:[['凑不齐人数'],['强度诉求相反']],rounds:[2,3]},
   running:{hard:['时间','路线/区域','配速','距离'],redLines:[['配速差太多'],['区域不重叠']],rounds:[2,2]},
   fitness:{hard:['时间','位置','训练类型','是否需搭子保护'],redLines:[['位置不重叠'],['目标完全错位']],rounds:[2,2]},
-  skiing:{hard:['雪场','日期','雪道难度','装备','是否过夜','拼车'],redLines:[['雪场不同且不愿换'],['日期冲突'],['难度差到不能同道']],rounds:[5,7]},
+  skiing:{hard:['雪场','日期','雪道难度','装备','是否拼住宿','拼车'],redLines:[['雪场不同且不愿换'],['日期冲突'],['难度差到不能同道']],rounds:[5,7]},
   pingpong:{hard:['时间','球馆/区域','单/双打','水平段位','教学局'],redLines:[['时间完全冲突'],['水平差过大']],rounds:[2,3]},
   football:{hard:['时间','场地','人数','位置偏好','强度'],redLines:[['凑不齐队伍'],['强度诉求相反'],['位置需求完全冲突']],rounds:[3,4]},
   swimming:{hard:['时间','场馆','泳道偏好','泳姿','目标'],redLines:[['场馆不重叠'],['泳道速度差过大'],['目标完全错位']],rounds:[2,2]},
   cycling:{hard:['时间','路线/目的地','距离','平均时速','难度','装备'],redLines:[['路线完全不重叠'],['时速差≥5km/h'],['难度差无法同行']],rounds:[3,4]},
-  hiking:{hard:['时间','路线/山峰','难度等级','里程','是否过夜','体力强度'],redLines:[['路线不同且不愿调整'],['难度差无法同行'],['过夜意愿冲突']],rounds:[4,6]},
+  hiking:{hard:['时间','路线/山峰','难度等级','里程','是否露营','体力强度'],redLines:[['路线不同且不愿调整'],['难度差无法同行'],['露营意愿冲突']],rounds:[4,6]},
   volleyball:{hard:['时间','场馆','几人制','水平段位','强度'],redLines:[['凑不齐人数'],['水平差过大'],['强度诉求相反']],rounds:[2,3]},
   pickleball:{hard:['时间','场地','单/双打','水平段位','场地资源'],redLines:[['时间冲突'],['水平差过大'],['场地资源无法共享']],rounds:[2,3]},
   bowling:{hard:['时间','场馆','人数','局数','模式'],redLines:[['时间完全冲突'],['人数凑不齐'],['模式诉求相反']],rounds:[1,2]},
@@ -847,6 +850,34 @@ async function loadCloudChats() {
     pruneChats();
     lsSet('mp_chats_'+S.uid, S.a2aChats);
   } catch(e) { console.warn('loadCloudChats failed:', e); }
+}
+
+// Realtime sync: keep listening for any chat this account is a participant in,
+// so a chat created by the OTHER person (e.g. they invited me) shows up live —
+// without me having to reload. Transcripts are immutable once created, so we
+// only ADD chats we don't already have locally and never clobber local read
+// state (chat.unread set to 0 when I open it).
+let _chatsUnsub = null;
+function attachChatsListener() {
+  if (_chatsUnsub) { try{_chatsUnsub();}catch(e){} _chatsUnsub=null; }
+  if (!db || !S.uid) return;
+  const myUid = S.uid;
+  try {
+    _chatsUnsub = db.collection('pools').doc(POOL_ID).collection('chats')
+      .where('participants','array-contains',myUid)
+      .onSnapshot(snap=>{
+        if (S.uid !== myUid) return; // account switched; ignore stale listener
+        const byId = {};
+        (S.a2aChats||[]).forEach(c=>{ byId[c.id]=c; });
+        let added = false;
+        snap.docs.forEach(d=>{ const c=d.data(); if(c&&c.id&&!byId[c.id]){ byId[c.id]=c; added=true; } });
+        if (!added) return;
+        S.a2aChats = Object.values(byId);
+        pruneChats();
+        lsSet('mp_chats_'+S.uid, S.a2aChats);
+        if (S.screen==='main') render();
+      }, err=>console.warn('chats listener error:', err));
+  } catch(e) { console.warn('attachChatsListener failed:', e); }
 }
 
 // The other person in a chat, from the CURRENT user's point of view.
@@ -998,6 +1029,7 @@ async function restoreSession() {
   S.uid = remembered;
   loadProfileForUid(remembered);
   await loadCloudChats();
+  attachChatsListener();
 }
 
 // Production: pool is built from real registrations only — no virtual classmate seeding.
@@ -1127,6 +1159,7 @@ async function doRegister(){
   const id=await acctId(inp.n,inp.p);
   if(await acctExists(id)){ toast('该姓名+PIN 已存在，请直接登录'); S.splashMode='login'; S.nickname=inp.n; render(); return; }
   S.uid=id; S.nickname=inp.n; lsSet('mp_current_acct',id);
+  attachChatsListener();
   startOB();
 }
 
@@ -1139,6 +1172,7 @@ async function doLogin(){
   S.uid=id; lsSet('mp_current_acct',id);
   loadProfileForUid(id);
   await loadCloudChats();
+  attachChatsListener();
   S.poolCount=await getPoolCount();
   render();
 }
@@ -1182,17 +1216,28 @@ function bMsg(t){ const w=el('div',{class:'msg-bot slide-up'});w.appendChild(el(
 function uMsg(t){ return el('div',{class:'msg-user slide-up'},[el('div',{class:'bubble-user',html:t})]); }
 
 function renderOBSelect(chat) {
+  if(S.addMode){
+    chat.appendChild(el('button',{class:'me-edit-btn',style:'margin:0 0 12px;',onclick:()=>{S.selectedSports=[...(S.preAddSports||[])];S.addMode=false;S.preAddSports=null;S.screen='main';S.tab='me';render();}},'← 返回'));
+    chat.appendChild(bMsg(`想再添加哪些运动？已添加的会置灰，点选新的即可：`));
+  } else
   chat.appendChild(bMsg(`Hello ${S.nickname}，welcome to Matchpoint！🎉\n\n请选择你感兴趣的运动（可多选）：`));
   const grid=el('div',{class:'sport-grid'});
   SPORTS.forEach(sp=>{
-    grid.appendChild(el('div',{class:'sport-card'+(S.selectedSports.includes(sp.key)?' sel':''),onclick:()=>{const i=S.selectedSports.indexOf(sp.key);if(i>=0)S.selectedSports.splice(i,1);else S.selectedSports.push(sp.key);render();}},[el('div',{class:'se',html:sp.e}),el('div',{html:sp.n})]));
+    const locked=S.addMode&&(S.preAddSports||[]).includes(sp.key);
+    const sel=S.selectedSports.includes(sp.key);
+    grid.appendChild(el('div',{class:'sport-card'+(locked?' locked':(sel?' sel':'')),onclick:locked?null:()=>{const i=S.selectedSports.indexOf(sp.key);if(i>=0)S.selectedSports.splice(i,1);else S.selectedSports.push(sp.key);render();}},[el('div',{class:'se',html:sp.e}),el('div',{html:sp.n})]));
   });
   chat.appendChild(grid);
+  const newPicks=S.addMode?S.selectedSports.filter(k=>!(S.preAddSports||[]).includes(k)):S.selectedSports;
   if(S.selectedSports.length>0){
-    const names=S.selectedSports.map(k=>SPORTS.find(s=>s.key===k)).map(s=>s.e+s.n).join('  ');
-    chat.appendChild(uMsg(`已选：${names}`));
-    chat.appendChild(bMsg(`好的！已选 ${S.selectedSports.length} 个运动，确认后逐一填写偏好。`));
-    chat.appendChild(el('button',{class:'btn',style:'max-width:200px;margin:4px auto;display:block;',onclick:()=>{S.selectedSports.forEach(k=>{if(!S.sportProg[k])S.sportProg[k]={answers:[],complete:false};});S.curSportKey=S.selectedSports[0];S.obStep='sport-qa';render();}},'确认选择 →'));
+    if(S.addMode&&newPicks.length===0){
+      chat.appendChild(bMsg(`点选上方未置灰的运动来添加新项目。`));
+    }else{
+      const names=newPicks.map(k=>SPORTS.find(s=>s.key===k)).map(s=>s.e+s.n).join('  ');
+      chat.appendChild(uMsg(`${S.addMode?'新增':'已选'}：${names}`));
+      chat.appendChild(bMsg(`好的！${S.addMode?`新增 ${newPicks.length} 个运动`:`已选 ${S.selectedSports.length} 个运动`}，确认后逐一填写偏好。`));
+      chat.appendChild(el('button',{class:'btn',style:'max-width:200px;margin:4px auto;display:block;',onclick:()=>{S.selectedSports.forEach(k=>{if(!S.sportProg[k])S.sportProg[k]={answers:[],complete:false};});S.curSportKey=S.selectedSports.find(k=>!(S.sportProg[k]||{}).complete)||S.selectedSports[0];S.obStep='sport-qa';render();}},'确认选择 →'));
+    }
   }
 }
 
@@ -1206,6 +1251,7 @@ function renderOBQA(chat) {
       chat.appendChild(bMsg(`${sp.e} ${sp.n} 采集完成 ✅\n\n🛡️ ${SPORT_REDLINES[key]}`));
       const nk=S.selectedSports.find(k=>{const p=S.sportProg[k]||{};return!p.complete;});
       if(nk){const ns=SPORTS.find(s=>s.key===nk);chat.appendChild(el('button',{class:'btn',style:'max-width:210px;margin:6px auto;display:block;',onclick:()=>{S.curSportKey=nk;render();}},`继续：${ns.e} ${ns.n} →`));}
+      else if(S.addMode){chat.appendChild(el('button',{class:'btn',style:'max-width:210px;margin:6px auto;display:block;',onclick:async()=>{S.addMode=false;S.preAddSports=null;await saveProfile();S.screen='main';S.tab='me';S.meSportTab=key;render();}},'完成添加 ✅'));}
       else{chat.appendChild(el('button',{class:'btn',style:'max-width:210px;margin:6px auto;display:block;',onclick:()=>{S.obStep='time-pref';render();}},'最后一步 →'));}
       return;
     }
@@ -1385,7 +1431,7 @@ function renderMe(root) {
   const pg=el('div',{class:'me-page slide-up'});
   pg.appendChild(el('div',{class:'me-header'},[
     el('div',{},[el('h1',{html:'Me'}),el('div',{style:'font-size:12px;color:#aaa;margin-top:3px;',html:hasSports?`streak: ${stats.days} days · level: ${levelAns?.a||'intermediate'}`:'完成注册后查看'})]  ),
-    el('button',{class:'me-edit-btn',onclick:()=>{if(confirm('重新填写档案？')){{S.screen='onboarding';S.obStep='sport-select';S.selectedSports=[];S.sportProg={};S.timePref={days:[],times:[]};render();}}}},'编辑档案'),
+    el('button',{class:'me-edit-btn',onclick:()=>{S.addMode=true;S.preAddSports=[...S.selectedSports];S.screen='onboarding';S.obStep='sport-select';render();}},'+ 添加运动'),
   ]));
   pg.appendChild(el('div',{class:'me-user-row'},[
     el('div',{class:'me-ava',html:(S.nickname||'M')[0].toUpperCase()}),
