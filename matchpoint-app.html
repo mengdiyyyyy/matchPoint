@@ -1,0 +1,2047 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Matchpoint</title>
+
+<!-- ============================================================
+  FIREBASE SETUP — 免费，40人绰绰有余
+
+  步骤（5分钟）：
+  1. 打开 https://console.firebase.google.com/
+  2. 新建项目（随便起名）→ 点「</> 网页」→ 复制 firebaseConfig
+  3. Firestore Database → 创建数据库（测试模式）
+  4. 把下面 FIREBASE_CONFIG 里的值替换成你的
+
+  Firestore 安全规则（测试模式自动允许，无需额外设置）
+  免费套餐：50,000 读/天，20,000 写/天，40人完全够用
+  ============================================================ -->
+<script>
+  const FIREBASE_CONFIG = {
+    apiKey: "",
+    authDomain: "",
+    projectId: "",
+    storageBucket: "",
+    messagingSenderId: "",
+    appId: ""
+  };
+  // 所有打开此页面的人自动进入同一个池（班级/活动名称，可自定义）
+  const POOL_ID = "matchpoint_class_01";
+  const FIREBASE_ENABLED = !!FIREBASE_CONFIG.apiKey;
+</script>
+<script>
+  // Load Firebase only if configured
+  if (window.FIREBASE_ENABLED) {
+    document.write('<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"><\/script>');
+    document.write('<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"><\/script>');
+  }
+</script>
+
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0;}
+html,body{
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",Arial,sans-serif;
+  background:#e5e7eb;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
+}
+.device-frame{
+  width:390px;height:844px;background:#fff;border-radius:44px;
+  box-shadow:0 24px 64px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.08);
+  overflow:hidden;position:relative;display:flex;flex-direction:column;flex-shrink:0;
+}
+@media(max-width:480px){body{padding:0;}.device-frame{width:100vw;height:100vh;border-radius:0;box-shadow:none;}}
+.status-bar{height:44px;padding:0 24px;display:flex;align-items:center;justify-content:space-between;font-size:13px;font-weight:600;color:#1a1a2e;flex-shrink:0;}
+.sb-right{display:flex;gap:4px;align-items:center;font-size:11px;}
+.page-container{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;}
+.page-container::-webkit-scrollbar{width:0;}
+
+/* === TAB BAR === */
+.tab-bar{height:72px;background:#fff;border-top:1px solid #f0f0f5;display:flex;align-items:stretch;padding:6px 0 16px;flex-shrink:0;}
+.tab-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;color:#9ca3af;position:relative;transition:color .2s;}
+.tab-item.active{color:#3B5BF6;}
+.tab-icon{font-size:22px;line-height:1;}
+.tab-label{font-size:10px;font-weight:500;}
+.tab-item.active .tab-label{font-weight:700;}
+.tab-dot{position:absolute;top:2px;right:calc(50% - 18px);width:7px;height:7px;background:#ef4444;border-radius:50%;border:1.5px solid #fff;}
+
+/* === SHARED COMPONENTS === */
+.btn{width:100%;padding:14px;background:#3B5BF6;color:#fff;font-size:15px;font-weight:700;border:none;border-radius:14px;cursor:pointer;transition:opacity .15s;}
+.btn:active{opacity:.85;}
+.btn.ghost{background:#EEF2FF;color:#3B5BF6;}
+.btn.sm{padding:9px 16px;font-size:13px;border-radius:12px;width:auto;}
+.chip{padding:7px 14px;border-radius:20px;border:1.5px solid #e5e7eb;background:#fff;font-size:13px;color:#555;cursor:pointer;transition:all .18s;}
+.chip.sel{background:#EEF2FF;border-color:#3B5BF6;color:#3B5BF6;font-weight:600;}
+.chips{display:flex;flex-wrap:wrap;gap:8px;}
+.text-inp{width:100%;padding:13px 16px;border:1.5px solid #e5e7eb;border-radius:14px;font-size:16px;color:#1a1a2e;outline:none;transition:border-color .2s;}
+.text-inp:focus{border-color:#3B5BF6;}
+
+/* === DYNAMIC ISLAND (scanning progress pill) ===
+   position:fixed so it stays anchored to the top of the viewport
+   regardless of which tab is rendered or how the user scrolled. */
+.dyn-island{
+  position:fixed;top:12px;left:50%;transform:translateX(-50%);
+  background:#0f0f14;color:#fff;border-radius:24px;
+  padding:8px 18px;display:flex;align-items:center;gap:10px;
+  font-size:12px;font-weight:600;z-index:9999;
+  box-shadow:0 8px 28px rgba(0,0,0,.35);
+  min-width:240px;max-width:340px;
+  animation:diSlide .3s ease;
+  transition:width .25s ease;
+}
+.dyn-island .di-spinner{
+  width:14px;height:14px;border-radius:50%;
+  border:2px solid rgba(255,255,255,.25);border-top-color:#7c93ff;
+  animation:diSpin 0.9s linear infinite;flex-shrink:0;
+}
+.dyn-island .di-text{flex:1;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dyn-island .di-sub{font-size:10px;color:#9ba0b3;font-weight:500;margin-top:1px;}
+.dyn-island .di-bar{height:3px;background:rgba(255,255,255,.12);border-radius:2px;margin-top:6px;overflow:hidden;}
+.dyn-island .di-bar-fill{height:100%;background:linear-gradient(90deg,#7c93ff,#a7b9ff);border-radius:2px;transition:width .2s ease;}
+.dyn-island .di-done{font-size:14px;flex-shrink:0;}
+@keyframes diSlide{from{opacity:0;transform:translateX(-50%) translateY(-8px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
+@keyframes diSpin{to{transform:rotate(360deg);}}
+
+/* === TOASTS === */
+.toast-wrap{position:absolute;bottom:86px;left:0;right:0;z-index:999;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:6px;}
+.toast{background:rgba(26,26,46,.85);color:#fff;padding:9px 18px;border-radius:20px;font-size:13px;backdrop-filter:blur(10px);animation:fadeUp .2s ease;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+@keyframes slideUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
+.slide-up{animation:slideUp .22s ease;}
+
+/* ===================== SPLASH ===================== */
+.splash{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100%;padding:40px 28px;background:#fff;}
+.splash-logo{font-size:52px;margin-bottom:8px;}
+.splash-brand{font-size:30px;font-weight:800;color:#1a1a2e;margin-bottom:4px;}
+.splash-sub{font-size:14px;color:#888;margin-bottom:44px;text-align:center;}
+.splash-field{width:100%;margin-bottom:14px;}
+.splash-label{font-size:13px;font-weight:600;color:#555;margin-bottom:7px;display:block;}
+.splash-hint{font-size:12px;color:#bbb;margin-top:14px;text-align:center;line-height:1.7;}
+.divider{display:flex;align-items:center;gap:12px;margin:14px 0;color:#ddd;font-size:12px;}
+.divider::before,.divider::after{content:'';flex:1;height:1px;background:#eee;}
+.room-row{display:flex;gap:10px;margin-bottom:14px;}
+.room-inp{flex:1;padding:13px 16px;border:1.5px solid #e5e7eb;border-radius:14px;font-size:18px;font-weight:700;letter-spacing:5px;color:#1a1a2e;outline:none;}
+.room-inp:focus{border-color:#3B5BF6;}
+.firebase-notice{margin-top:12px;padding:12px 14px;background:#fffbeb;border:1px solid #fcd34d;border-radius:12px;font-size:12px;color:#92400e;line-height:1.6;}
+.firebase-notice a{color:#3B5BF6;}
+
+/* ===================== ONBOARDING ===================== */
+.ob-page{display:flex;flex-direction:column;height:100%;background:#fff;}
+.ob-top{padding:10px 16px 8px;border-bottom:1px solid #f0f0f5;flex-shrink:0;}
+.ob-tabs{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;}
+.ob-tabs::-webkit-scrollbar{height:0;}
+.ob-tab{display:flex;align-items:center;gap:5px;padding:6px 12px;border-radius:20px;border:1.5px solid #e5e7eb;font-size:13px;white-space:nowrap;cursor:pointer;flex-shrink:0;background:#fff;color:#666;position:relative;}
+.ob-tab.active{background:#EEF2FF;border-color:#3B5BF6;color:#3B5BF6;font-weight:600;}
+.ob-tab.done{background:#F0FDF4;border-color:#22c55e;color:#16a34a;}
+.ob-done-dot{position:absolute;bottom:-3px;right:-3px;width:14px;height:14px;background:#22c55e;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px;color:#fff;border:2px solid #fff;}
+.ob-progress{font-size:11px;color:#3B5BF6;font-weight:700;margin-top:6px;}
+.ob-chat{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;}
+.ob-chat::-webkit-scrollbar{width:0;}
+
+/* Chat bubbles */
+.msg-bot{display:flex;gap:10px;align-items:flex-end;}
+.bot-ava{width:32px;height:32px;border-radius:50%;background:#3B5BF6;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;}
+.bubble-bot{background:#F0F3FF;color:#1a1a2e;padding:11px 15px;border-radius:18px 18px 18px 4px;font-size:14px;line-height:1.6;max-width:76%;}
+.msg-user{display:flex;justify-content:flex-end;}
+.bubble-user{background:#3B5BF6;color:#fff;padding:11px 15px;border-radius:18px 18px 4px 18px;font-size:14px;line-height:1.6;max-width:76%;}
+.sport-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+.sport-card{display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px;border-radius:12px;border:1.5px solid #e5e7eb;cursor:pointer;transition:all .2s;background:#fff;font-size:11px;color:#666;text-align:center;}
+.sport-card .se{font-size:22px;}
+.sport-card.sel{background:#EEF2FF;border-color:#3B5BF6;color:#3B5BF6;font-weight:600;}
+.ob-text-row{display:flex;gap:8px;}
+.ob-text-input{flex:1;padding:9px 13px;background:#f8f9fc;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;outline:none;}
+.ob-text-input:focus{border-color:#3B5BF6;}
+.ob-save{padding:9px 16px;background:#3B5BF6;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;}
+
+/* ===================== ME ===================== */
+.me-page{padding-bottom:32px;}
+.me-header{padding:20px 20px 0;display:flex;justify-content:space-between;align-items:flex-start;}
+.me-header h1{font-size:26px;font-weight:800;color:#1a1a2e;}
+.me-edit-btn{padding:7px 14px;background:#EEF2FF;color:#3B5BF6;border:none;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;}
+.me-user-row{display:flex;align-items:center;gap:16px;padding:18px 20px 0;}
+.me-ava{width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#6c63ff,#a78bfa);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:#fff;flex-shrink:0;}
+.me-name{font-size:20px;font-weight:800;color:#1a1a2e;}
+.me-role{font-size:13px;color:#888;margin-top:3px;}
+.me-room-tag{display:inline-flex;align-items:center;gap:5px;margin-top:6px;padding:3px 10px;background:#EEF2FF;border-radius:20px;font-size:12px;color:#3B5BF6;font-weight:600;cursor:pointer;}
+.sport-tabs{display:flex;gap:8px;flex-wrap:wrap;padding:16px 20px 0;}
+.sport-tab{padding:7px 16px;border-radius:20px;border:1.5px solid #e5e7eb;font-size:13px;font-weight:500;color:#555;cursor:pointer;transition:all .2s;background:#fff;}
+.sport-tab.active{background:#EEF2FF;border-color:#3B5BF6;color:#3B5BF6;font-weight:700;}
+.stats-card{margin:14px 20px 0;background:#F0F3FF;border-radius:16px;padding:16px 8px;display:grid;grid-template-columns:repeat(3,1fr);}
+.stat-cell{text-align:center;}
+.stat-icon{font-size:16px;margin-bottom:5px;}
+.stat-num{font-size:20px;font-weight:800;color:#1a1a2e;}
+.stat-unit{font-size:11px;color:#999;margin-left:1px;}
+.stat-label{font-size:11px;color:#aaa;margin-top:2px;}
+.sport-prefs{padding:14px 20px 0;}
+.prefs-title{font-size:14px;font-weight:700;color:#1a1a2e;margin-bottom:10px;display:flex;align-items:center;gap:6px;}
+.prefs-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;}
+.pref-card{background:#f8f9fc;border-radius:12px;padding:12px 14px;}
+.pref-label{font-size:11px;color:#aaa;margin-bottom:3px;}
+.pref-val{font-size:14px;font-weight:700;color:#1a1a2e;}
+.redline-card{background:#FFF8EC;border-left:3px solid #F59E0B;border-radius:0 10px 10px 0;padding:9px 14px;font-size:12px;color:#92400e;line-height:1.6;}
+.me-section{padding:18px 20px 0;}
+.me-section-title{font-size:15px;font-weight:700;color:#1a1a2e;margin-bottom:12px;display:flex;align-items:center;gap:6px;}
+.quick-btns{display:flex;gap:8px;flex-wrap:wrap;}
+.quick-btn{padding:7px 14px;background:#EEF2FF;color:#3B5BF6;border:none;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;}
+.me-rows{padding:14px 20px 0;display:flex;flex-direction:column;gap:10px;}
+.me-row{display:flex;align-items:center;gap:12px;padding:14px;background:#f8f9fc;border-radius:14px;cursor:pointer;}
+.me-row-icon{font-size:18px;}
+.me-row-text{font-size:15px;font-weight:600;color:#1a1a2e;}
+.me-row-arrow{margin-left:auto;font-size:16px;color:#ccc;}
+
+/* ===================== AI PAGE ===================== */
+.ai-page{display:flex;flex-direction:column;height:100%;}
+.ai-header{padding:16px 20px 12px;border-bottom:1px solid #f0f0f5;flex-shrink:0;}
+.ai-header h1{font-size:24px;font-weight:800;color:#1a1a2e;}
+.ai-header-row{display:flex;align-items:center;justify-content:space-between;margin-top:6px;}
+.ai-status{display:flex;align-items:center;gap:6px;font-size:12px;color:#22c55e;font-weight:600;}
+.ai-status-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;}
+.ai-pool-tag{padding:4px 12px;background:#f8f9fc;border-radius:20px;font-size:12px;color:#888;}
+.ai-chat{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;}
+.ai-chat::-webkit-scrollbar{width:0;}
+.ai-msg-ai{display:flex;gap:10px;align-items:flex-start;}
+.ai-ava{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#3B5BF6,#818cf8);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;}
+.ai-bubble-ai{background:#F0F3FF;color:#1a1a2e;padding:11px 15px;border-radius:4px 18px 18px 18px;font-size:14px;line-height:1.6;max-width:78%;}
+.ai-msg-user{display:flex;justify-content:flex-end;}
+.ai-bubble-user{background:#3B5BF6;color:#fff;padding:11px 15px;border-radius:18px 4px 18px 18px;font-size:14px;line-height:1.6;max-width:78%;}
+.ai-sys{text-align:center;}
+.ai-sys-tag{display:inline-block;padding:4px 12px;background:#f0f0f5;border-radius:20px;font-size:11px;color:#aaa;}
+
+/* Condition card (AI generates this) */
+.cond-card{background:#fff;border:1.5px solid #c7d2fe;border-radius:16px;overflow:hidden;margin-top:4px;max-width:78%;}
+.cond-header{background:#EEF2FF;padding:10px 14px;display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#3B5BF6;}
+.cond-rows{padding:10px 14px;}
+.cond-row{display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #f5f5f8;font-size:13px;}
+.cond-row:last-child{border-bottom:none;}
+.cond-key{color:#aaa;width:56px;flex-shrink:0;}
+.cond-val{color:#1a1a2e;font-weight:600;}
+.cond-actions{display:flex;gap:8px;padding:8px 14px 12px;}
+.cond-btn-no{flex:1;padding:8px;border-radius:10px;border:1.5px solid #e5e7eb;background:#fff;font-size:13px;color:#888;cursor:pointer;}
+.cond-btn-yes{flex:2;padding:8px;background:#3B5BF6;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;}
+
+/* Searching animation */
+.ai-searching{display:flex;gap:5px;align-items:center;padding:11px 15px;background:#F0F3FF;border-radius:4px 18px 18px 18px;width:fit-content;}
+.ai-searching span{width:6px;height:6px;border-radius:50%;background:#3B5BF6;animation:tp 1.2s ease-in-out infinite;}
+.ai-searching span:nth-child(2){animation-delay:.2s;}
+.ai-searching span:nth-child(3){animation-delay:.4s;}
+@keyframes tp{0%,60%,100%{transform:scale(.7);opacity:.4;}30%{transform:scale(1.2);opacity:1;}}
+
+/* Result cards from AI scan */
+.ai-result-card{background:#fff;border:1.5px solid #e5e7eb;border-radius:14px;padding:14px;max-width:88%;margin-top:4px;}
+.arc-name-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.arc-ava{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#818cf8,#a78bfa);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;}
+.arc-name{font-size:15px;font-weight:700;color:#1a1a2e;}
+.arc-score{margin-left:auto;font-size:13px;font-weight:800;color:#3B5BF6;}
+.arc-tags{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;}
+.arc-tag{padding:3px 9px;border-radius:8px;font-size:11px;background:#f4f6ff;color:#555;}
+.arc-tag.match{background:#F0FDF4;color:#16a34a;}
+.arc-actions{display:flex;gap:8px;}
+.arc-btn-pass{flex:1;padding:8px;border-radius:10px;border:1.5px solid #e5e7eb;background:#fff;font-size:12px;color:#888;cursor:pointer;}
+.arc-btn-invite{flex:2;padding:8px;background:#3B5BF6;color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;}
+
+/* AI input */
+.ai-input-bar{padding:10px 16px 14px;background:#fff;border-top:1px solid #f0f0f5;display:flex;gap:10px;align-items:center;flex-shrink:0;}
+.ai-input{flex:1;padding:10px 16px;background:#f4f6ff;border:none;border-radius:24px;font-size:14px;color:#1a1a2e;outline:none;}
+.ai-input::placeholder{color:#bbb;}
+.ai-send{width:40px;height:40px;border-radius:50%;background:#3B5BF6;border:none;color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+
+/* ===================== CHATS ===================== */
+.chats-page{padding-bottom:16px;}
+.chats-header{padding:20px 20px 16px;}
+.chats-header h1{font-size:26px;font-weight:800;color:#1a1a2e;}
+.chats-header .ch-sub{font-size:12px;color:#aaa;margin-top:3px;}
+.chat-list{padding:0 16px;}
+.chat-item{display:flex;gap:13px;align-items:center;padding:14px 4px;border-bottom:1px solid #f5f5f8;cursor:pointer;}
+.chat-item:last-child{border-bottom:none;}
+.ci-ava-wrap{position:relative;flex-shrink:0;}
+.ci-ava{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#fff;}
+.ci-dot{position:absolute;bottom:1px;right:1px;width:11px;height:11px;border-radius:50%;border:2px solid #fff;}
+.ci-dot.active{background:#22c55e;} .ci-dot.pending{background:#f59e0b;} .ci-dot.ai{background:#3B5BF6;}
+.ci-info{flex:1;min-width:0;}
+.ci-row1{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;}
+.ci-name{font-size:15px;font-weight:700;color:#1a1a2e;}
+.ci-time{font-size:11px;color:#bbb;}
+.ci-msg{font-size:13px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:5px;}
+.ci-badges{display:flex;gap:6px;}
+.ci-badge{padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;}
+.ci-badge.a2a{background:#EEF2FF;color:#3B5BF6;}
+.ci-badge.confirmed{background:#F0FDF4;color:#16a34a;}
+.ci-badge.pending{background:#FFF8EC;color:#B45309;}
+.ci-badge.no-match{background:#f4f4f5;color:#999;}
+.ci-unread{min-width:20px;height:20px;background:#3B5BF6;border-radius:10px;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px;flex-shrink:0;}
+.ci-match-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 2px #fff,0 1px 3px rgba(0,0,0,.15);}
+
+/* Chat detail */
+.chat-detail{display:flex;flex-direction:column;height:100%;}
+.cd-header{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #f0f0f5;flex-shrink:0;}
+.cd-back{font-size:24px;color:#3B5BF6;cursor:pointer;line-height:1;}
+.cd-ava{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:#fff;flex-shrink:0;}
+.cd-name{font-size:15px;font-weight:700;color:#1a1a2e;}
+.cd-sub{font-size:11px;color:#3B5BF6;margin-top:2px;}
+.cd-actions{margin-left:auto;display:flex;gap:14px;font-size:20px;cursor:pointer;}
+.cd-msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;}
+.cd-msgs::-webkit-scrollbar{width:0;}
+.dmsg-sys{text-align:center;}
+.dmsg-sys-tag{display:inline-block;padding:3px 12px;background:#f0f0f5;border-radius:20px;font-size:11px;color:#aaa;}
+.dmsg-row{display:flex;gap:8px;align-items:flex-end;}
+.dmsg-row.r{flex-direction:row-reverse;}
+.dmsg-ava{width:30px;height:30px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;}
+.dmsg-bubble{padding:10px 14px;border-radius:14px 14px 14px 4px;font-size:13px;max-width:74%;background:#f4f6ff;color:#1a1a2e;line-height:1.6;}
+.dmsg-row.r .dmsg-bubble{background:#3B5BF6;color:#fff;border-radius:14px 14px 4px 14px;}
+.dmsg-label{font-size:10px;color:#bbb;margin:0 10px 3px;text-align:left;}
+.dmsg-label.r{text-align:right;}
+.cd-input-bar{padding:10px 16px 14px;background:#fff;border-top:1px solid #f0f0f5;display:flex;gap:10px;align-items:center;flex-shrink:0;}
+.cd-input{flex:1;padding:9px 14px;background:#f4f6ff;border:none;border-radius:22px;font-size:14px;color:#aaa;outline:none;}
+.cd-send{width:36px;height:36px;border-radius:50%;background:#3B5BF6;border:none;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;}
+
+/* Firebase setup banner */
+.setup-banner{margin:12px 16px;padding:14px 16px;background:#fffbeb;border:1.5px solid #fcd34d;border-radius:14px;font-size:12px;color:#92400e;line-height:1.7;}
+.setup-banner strong{color:#b45309;}
+.setup-banner a{color:#3B5BF6;}
+</style>
+</head>
+<body>
+<div class="device-frame">
+  <div class="status-bar">
+    <span id="sbTime">20:29</span>
+    <div class="sb-right"><span>●●●●</span><span>📶</span><span>🔋</span></div>
+  </div>
+  <main class="page-container" id="pageContainer"></main>
+  <nav class="tab-bar" id="tabBar" style="display:none">
+    <div class="tab-item" data-tab="chats">
+      <div class="tab-icon">💬</div>
+      <div class="tab-label">Chats</div>
+      <div class="tab-dot" id="chatDot" style="display:none"></div>
+    </div>
+    <div class="tab-item active" data-tab="ai">
+      <div class="tab-icon">✦</div>
+      <div class="tab-label">AI</div>
+    </div>
+    <div class="tab-item" data-tab="me">
+      <div class="tab-icon">👤</div>
+      <div class="tab-label">Me</div>
+    </div>
+  </nav>
+  <div id="dynIsland"></div>
+  <div class="toast-wrap" id="toastWrap"></div>
+</div>
+
+<script>
+// ============================================================
+// SPORT DATA
+// ============================================================
+const SPORTS = [
+  {key:'badminton',e:'🏸',n:'羽毛球'},{key:'tennis',e:'🎾',n:'网球'},{key:'basketball',e:'🏀',n:'篮球'},
+  {key:'running',e:'🏃',n:'跑步'},{key:'fitness',e:'🏋️',n:'健身'},{key:'skiing',e:'⛷️',n:'滑雪'},
+  {key:'pingpong',e:'🏓',n:'乒乓球'},{key:'football',e:'⚽',n:'足球'},{key:'swimming',e:'🏊',n:'游泳'},
+  {key:'cycling',e:'🚴',n:'骑行'},{key:'hiking',e:'🥾',n:'徒步'},{key:'volleyball',e:'🏐',n:'排球'},
+  {key:'pickleball',e:'🏓',n:'匹克球'},{key:'bowling',e:'🎳',n:'保龄球'},{key:'climbing',e:'🧗',n:'攀岩'},
+  {key:'frisbee',e:'🥏',n:'飞盘'},{key:'paddleboard',e:'🛶',n:'桨板'},{key:'orienteering',e:'🧭',n:'定向'},
+  {key:'billiards',e:'🎱',n:'台球'},{key:'yoga',e:'🧘',n:'瑜伽'},
+];
+const SPORT_QS = {
+  badminton:[{q:'一般在哪里打羽毛球？',type:'text',ph:'如：朝阳区、国贸附近'},{q:'偏好单打还是双打？',type:'chips',opts:['单打','双打','都可以']},{q:'水平大概是？',type:'chips',opts:['新手','入门','进阶','高手','竞技']},{q:'约局一般缺几人？',type:'chips',opts:['缺1人','缺2-3人','缺一队','看情况']}],
+  tennis:[{q:'一般在哪里打网球？',type:'text',ph:'如：朝阳公园、工体附近'},{q:'偏好单打还是双打？',type:'chips',opts:['单打','双打','都可以']},{q:'NTRP 水平？',type:'chips',opts:['2.5以下','2.5-3.0','3.0-3.5','3.5-4.0','4.0+']},{q:'有固定球场资源吗？',type:'chips',opts:['有','没有','偶尔有']}],
+  basketball:[{q:'一般在哪里打篮球？',type:'text',ph:'如：奥森、国贸球场'},{q:'偏好几人制？',type:'chips',opts:['3V3','5V5','半场休闲','都行']},{q:'打球强度偏好？',type:'chips',opts:['休闲养生','认真竞技','野球随性']}],
+  running:[{q:'一般在哪里跑步？',type:'text',ph:'如：奥森、护城河'},{q:'配速大概？',type:'chips',opts:['7分外','6-7分','5-6分','4-5分','按心率']},{q:'一般跑多少公里？',type:'chips',opts:['3-5km','5-10km','10-15km','半马+']}],
+  fitness:[{q:'在哪个区域健身？',type:'text',ph:'如：望京、三里屯'},{q:'训练类型偏好？',type:'chips',opts:['力量训练','有氧为主','综合搭配']},{q:'需要搭子保护吗？',type:'chips',opts:['需要','不需要','大重量时需要']}],
+  skiing:[{q:'偏好哪个雪场？',type:'chips',opts:['崇礼系','东北系','新疆系','出境随缘']},{q:'雪道难度？',type:'chips',opts:['绿道','蓝道','红道','黑道+']},{q:'装备状况？',type:'chips',opts:['全套自有','部分自有','全部租借']},{q:'愿意过夜吗？',type:'chips',opts:['是','否','看情况']},{q:'愿意拼车吗？',type:'chips',opts:['是','否','看情况']}],
+  pingpong:[{q:'在哪里打乒乓球？',type:'text',ph:'如：海淀球馆'},{q:'单打还是双打？',type:'chips',opts:['单打','双打','都可以']},{q:'水平？',type:'chips',opts:['新手','入门','进阶','高手']},{q:'需要教学局？',type:'chips',opts:['是','否','偶尔']}],
+  football:[{q:'在哪里踢球？',type:'text',ph:'如：朝阳公园'},{q:'几人制？',type:'chips',opts:['5人制','7人制','11人制','都行']},{q:'位置偏好？',type:'chips',opts:['前锋','中场','后卫','门将','随意']},{q:'强度偏好？',type:'chips',opts:['养生随意','认真竞技']}],
+  swimming:[{q:'在哪里游泳？',type:'text',ph:'如：国家游泳中心'},{q:'偏好泳道？',type:'chips',opts:['慢速道','中速道','快速道']},{q:'主要泳姿？',type:'chips',opts:['自由泳','蛙泳','蝶泳','背泳']},{q:'游泳目标？',type:'chips',opts:['打卡健身','提升技术','约练进阶']}],
+  cycling:[{q:'主要骑行区域？',type:'text',ph:'如：延庆、妫水河'},{q:'常规骑行距离？',type:'chips',opts:['30km以内','30-60km','60-100km','100km+']},{q:'平均时速？',type:'chips',opts:['<20km/h','20-25km/h','25-30km/h','30+km/h']},{q:'装备类型？',type:'chips',opts:['竞技公路车','入门公路车','山地车','折叠车']},{q:'爬坡难度接受？',type:'chips',opts:['平路为主','小坡','中等爬坡','挑战爬坡']}],
+  hiking:[{q:'常去哪些路线？',type:'text',ph:'如：妙峰山、灵山'},{q:'能应对的难度？',type:'chips',opts:['入门级','中级','进阶','挑战级']},{q:'一般徒步多少公里？',type:'chips',opts:['5km以内','5-15km','15-25km','25km+']},{q:'愿意过夜露营？',type:'chips',opts:['是','否','偶尔']},{q:'强度偏好？',type:'chips',opts:['轻松游览','中强度','认真挑战']}],
+  volleyball:[{q:'在哪里打排球？',type:'text',ph:'如：海淀公园'},{q:'几人制？',type:'chips',opts:['沙滩2V2','4V4','6V6','都行']},{q:'水平？',type:'chips',opts:['新手','入门','进阶','高手']},{q:'强度偏好？',type:'chips',opts:['娱乐','竞技']}],
+  pickleball:[{q:'在哪里打匹克球？',type:'text',ph:'如：朝阳、望京'},{q:'单打/双打？',type:'chips',opts:['单打','双打','都可以']},{q:'水平？',type:'chips',opts:['新手','入门','进阶','高手']},{q:'有固定场地？',type:'chips',opts:['有','没有','偶尔']}],
+  bowling:[{q:'在哪个区域打保龄球？',type:'text',ph:'如：国贸、西单'},{q:'几人同玩？',type:'chips',opts:['2人','3-4人','5人+','随意']},{q:'打几局？',type:'chips',opts:['1-2局','3-4局','5局+','随意']},{q:'玩法偏好？',type:'chips',opts:['休闲娱乐','认真比赛']}],
+  climbing:[{q:'在哪个岩馆？',type:'text',ph:'如：Wild Moves'},{q:'难度等级？',type:'chips',opts:['V0-V2','V3-V5','V6-V8','V8+']},{q:'有保护能力？',type:'chips',opts:['是，已认证','是，自学','没有']},{q:'需要教学局？',type:'chips',opts:['是','否','有时候']}],
+  frisbee:[{q:'在哪里玩飞盘？',type:'text',ph:'如：朝阳公园、奥森'},{q:'几人制？',type:'chips',opts:['4V4','5V5','7V7','随意']},{q:'水平？',type:'chips',opts:['新手','入门','进阶','高手']},{q:'强度偏好？',type:'chips',opts:['休闲娱乐','认真竞技']},{q:'熟悉规则？',type:'chips',opts:['熟悉','基本了解','不太了解']}],
+  paddleboard:[{q:'在哪里玩桨板？',type:'text',ph:'如：昆明湖、密云水库'},{q:'装备状况？',type:'chips',opts:['自有全套','部分自有','全部租借']},{q:'水平？',type:'chips',opts:['新手','进阶','高手']},{q:'需要教学？',type:'chips',opts:['是','否','有时候']}],
+  orienteering:[{q:'常去哪些场地？',type:'text',ph:'如：奥森、延庆'},{q:'难度偏好？',type:'chips',opts:['入门白橙','进阶黄绿','高级红蓝','精英棕黑']},{q:'一般跑多少公里？',type:'chips',opts:['3km以内','3-5km','5-10km','10km+']},{q:'通常几人参加？',type:'chips',opts:['独自','2人','3-5人','团队']}],
+  billiards:[{q:'在哪个区域打台球？',type:'text',ph:'如：三里屯、望京'},{q:'偏好台型？',type:'chips',opts:['美式8球','斯诺克','中式8球','都行']},{q:'水平？',type:'chips',opts:['新手','入门','进阶','高手']},{q:'打几局？',type:'chips',opts:['1-3局','4-6局','7局+','按时间']}],
+  yoga:[{q:'在哪里上课？',type:'text',ph:'如：朝阳、三里屯瑜伽馆'},{q:'课程类型？',type:'chips',opts:['哈他瑜伽','流瑜伽','普拉提','热瑜伽']},{q:'强度偏好？',type:'chips',opts:['放松级','中等强度','高强度']},{q:'新手友好需求？',type:'chips',opts:['我是新手','有基础','进阶练习者']}],
+};
+
+// Multi-select flags: list of qIdx per sport that allow choosing multiple options.
+// Anything not listed is single-select (level/segment/intensity-pace etc — these
+// should remain exclusive for matching accuracy).
+const MULTI_QS = {
+  badminton:[1],        // 单/双打
+  tennis:[1],           // 单/双打
+  basketball:[1,2],     // 几人制 + 强度
+  running:[2],          // 距离
+  fitness:[1],          // 训练类型
+  skiing:[0,1],         // 雪场 + 难度
+  pingpong:[1],         // 单/双打
+  football:[1,2],       // 几人制 + 位置
+  swimming:[1,2,3],     // 泳道 + 泳姿 + 目标
+  cycling:[1,3,4],      // 距离 + 装备 + 爬坡
+  hiking:[1,2,4],       // 难度 + 里程 + 强度
+  volleyball:[1,3],     // 几人制 + 强度
+  pickleball:[1],       // 单/双打
+  bowling:[1,2,3],      // 人数 + 局数 + 模式
+  climbing:[1],         // 难度
+  frisbee:[1,3],        // 几人制 + 强度
+  paddleboard:[],
+  orienteering:[1,2,3], // 难度 + 距离 + 人数
+  billiards:[1,3],      // 台型 + 局数
+  yoga:[1,2],           // 课程类型 + 强度
+};
+// Apply multi flags into SPORT_QS so renderWidget can read q.multi directly
+Object.entries(MULTI_QS).forEach(([k,idxs]) => {
+  const qs = SPORT_QS[k] || [];
+  idxs.forEach(i => { if (qs[i] && qs[i].type === 'chips') qs[i].multi = true; });
+});
+const SPORT_REDLINES = {
+  badminton:'水平差≥2段时自动过滤',tennis:'NTRP差异过大时不推荐',basketball:'凑不齐人数或强度相反时过滤',
+  running:'配速差超1min/km时不推荐',fitness:'位置不重叠或目标错位时过滤',skiing:'雪场不同且不愿换时不推荐',
+  pingpong:'水平差过大时过滤',football:'凑不齐队伍或强度相反时过滤',swimming:'场馆不重叠或泳速差异大时过滤',
+  cycling:'路线不重叠或时速差≥5km/h时过滤',hiking:'路线不同且不愿调整时过滤',volleyball:'水平差或强度相反时过滤',
+  pickleball:'水平差或场地不可共享时过滤',bowling:'人数凑不齐或模式相反时过滤',climbing:'难度差大或保护能力不匹配时过滤',
+  frisbee:'水平差或强度相反时过滤',paddleboard:'水域不重叠或进阶差时过滤',orienteering:'场地不重叠或难度差时过滤',
+  billiards:'台型不符或水平差时过滤',yoga:'场馆不重叠或强度差时过滤',
+};
+
+// ============================================================
+// TECHNICAL DIMENSIONS per sport (from Sheet_20260608.csv 硬条件)
+// Drives the real A2A matching engine. Each dim points at a question
+// index in SPORT_QS, declares how to compare, and whether it's a red
+// line (critical). Time is NOT included — time is treated as flexible.
+//
+// type: 'cat' (categorical equality, with optional flex set)
+//       'ord' (ordered scale with maxGap for red-line detection)
+//       'venue' (text venue/route — substring overlap)
+//       'oppose' (opposing-camp pairs that produce a hard conflict)
+// ============================================================
+const TECH_DIMS = {
+  badminton: [
+    {qIdx:1, label:'单/双打', type:'cat', flex:['都可以'], critical:true,
+      ask:'我这边偏好「{my}」，你呢？', okMsg:'「{their}」，跟你一致 ✅', flexMsg:'「{their}」，我比较灵活 👍', conflictMsg:'我这边「{their}」，单双打偏好不同。'},
+    {qIdx:2, label:'水平段位', type:'ord', order:['新手','入门','进阶','高手','竞技'], maxGap:1, critical:true,
+      ask:'水平这块我是「{my}」，你段位呢？', okMsg:'我是「{their}」，水平接近，能打起来 ✅', gapMsg:'我「{their}」，差 {gap} 段，能打但节奏可能不同步。', conflictMsg:'我「{their}」，差 {gap} 段，水平差距过大很难同场。'},
+    {qIdx:3, label:'缺人需求', type:'cat', flex:['看情况'], critical:false,
+      ask:'你们约局一般缺几人？我这边是「{my}」', okMsg:'「{their}」，刚好对上 ✅', flexMsg:'「{their}」，比较灵活 👍', conflictMsg:'「{their}」，凑局节奏不太一样，需要协调。'},
+  ],
+  tennis: [
+    {qIdx:1, label:'单/双打', type:'cat', flex:['都可以'], critical:true,
+      ask:'单双打偏好我是「{my}」，你呢？', okMsg:'「{their}」，一致 ✅', flexMsg:'「{their}」，我灵活 👍', conflictMsg:'我「{their}」，约球节奏对不上。'},
+    {qIdx:2, label:'NTRP 水平', type:'ord', order:['2.5以下','2.5-3.0','3.0-3.5','3.5-4.0','4.0+'], maxGap:1, critical:true,
+      ask:'NTRP 我是「{my}」，你段位呢？', okMsg:'我「{their}」，对得起拍 ✅', gapMsg:'我「{their}」，差 {gap} 级，能打但偏练习局。', conflictMsg:'我「{their}」，NTRP 差 {gap} 级，对位悬殊。'},
+    {qIdx:3, label:'场地资源', type:'cat', flex:['偶尔有'], critical:false,
+      ask:'有没有固定球场资源？我这边「{my}」', okMsg:'「{their}」，订场不愁 ✅', flexMsg:'「{their}」，可以临时凑 👍', conflictMsg:'「{their}」，订场可能有点麻烦。'},
+  ],
+  basketball: [
+    {qIdx:1, label:'几人制', type:'cat', flex:['都行'], critical:true,
+      ask:'几人制我是「{my}」，你那边？', okMsg:'「{their}」，一样 ✅', flexMsg:'「{their}」，灵活 👍', conflictMsg:'「{their}」，凑队人数对不上。'},
+    {qIdx:2, label:'强度', type:'oppose', pairs:[['休闲养生','认真竞技']], critical:true,
+      ask:'打球强度我是「{my}」，你呢？', okMsg:'「{their}」，节奏一致 ✅', conflictMsg:'我「{their}」，养生 vs 竞技差太多。'},
+  ],
+  running: [
+    {qIdx:1, label:'配速', type:'ord', order:['7分外','6-7分','5-6分','4-5分','按心率'], maxGap:1, critical:true,
+      ask:'配速我跑「{my}」，你呢？', okMsg:'我「{their}」，跟得上 ✅', gapMsg:'我「{their}」，差一档，慢跑能合。', conflictMsg:'我「{their}」，配速差超 1min/km，跑不到一起。'},
+    {qIdx:2, label:'距离', type:'ord', order:['3-5km','5-10km','10-15km','半马+'], maxGap:2, critical:false,
+      ask:'一般跑多少？我「{my}」', okMsg:'我「{their}」，跑量匹配 ✅', gapMsg:'我「{their}」，跑量稍有差距。', conflictMsg:'我「{their}」，跑量差距大。'},
+  ],
+  fitness: [
+    {qIdx:0, label:'健身房位置', type:'venue', critical:true,
+      ask:'位置我在「{my}」，你呢？', okMsg:'我也在「{their}」附近 ✅', conflictMsg:'我在「{their}」，位置不重叠没法一起练。'},
+    {qIdx:1, label:'训练类型', type:'oppose', pairs:[['力量训练','有氧为主']], critical:true,
+      ask:'训练类型我偏「{my}」，你呢？', okMsg:'我也「{their}」，方向一致 ✅', flexMsg:'我「{their}」，混合训练能合 👍', conflictMsg:'我「{their}」，目标完全错位。'},
+    {qIdx:2, label:'搭子保护', type:'cat', flex:['大重量时需要'], critical:false,
+      ask:'需要搭子保护吗？我「{my}」', okMsg:'我「{their}」，一致 ✅', flexMsg:'我「{their}」，按需配合 👍', conflictMsg:'我「{their}」，搭练需求不一致。'},
+  ],
+  skiing: [
+    {qIdx:0, label:'雪场偏好', type:'cat', critical:true,
+      ask:'雪场我偏好「{my}」系，你呢？', okMsg:'我也走「{their}」系 ✅', conflictMsg:'我去「{their}」系，雪场体系不同。'},
+    {qIdx:1, label:'雪道难度', type:'ord', order:['绿道','蓝道','红道','黑道+'], maxGap:1, critical:true,
+      ask:'雪道我能滑「{my}」，你呢？', okMsg:'我「{their}」，同道没问题 ✅', gapMsg:'我「{their}」，差一档，能找重叠道。', conflictMsg:'我「{their}」，难度差到不能同道。'},
+    {qIdx:2, label:'装备', type:'cat', flex:['部分自有'], critical:false,
+      ask:'装备「{my}」，你呢？', okMsg:'我「{their}」，装备齐 ✅', flexMsg:'我「{their}」，可以拼凑 👍', conflictMsg:'我「{their}」，装备状态差距大。'},
+    {qIdx:3, label:'过夜意愿', type:'cat', flex:['看情况'], critical:true,
+      ask:'愿意过夜吗？我「{my}」', okMsg:'我「{their}」，节奏一样 ✅', flexMsg:'我「{their}」，灵活 👍', conflictMsg:'我「{their}」，过夜意愿冲突。'},
+    {qIdx:4, label:'拼车', type:'cat', flex:['看情况'], critical:false,
+      ask:'拼车呢？我「{my}」', okMsg:'我「{their}」，搭得了车 ✅', flexMsg:'我「{their}」 👍', conflictMsg:'我「{their}」，出行方式不一致。'},
+  ],
+  pingpong: [
+    {qIdx:1, label:'单/双打', type:'cat', flex:['都可以'], critical:true,
+      ask:'单双打我「{my}」，你呢？', okMsg:'我「{their}」，一致 ✅', flexMsg:'我「{their}」，灵活 👍', conflictMsg:'我「{their}」，打法不一样。'},
+    {qIdx:2, label:'水平', type:'ord', order:['新手','入门','进阶','高手'], maxGap:1, critical:true,
+      ask:'水平我「{my}」，你呢？', okMsg:'我「{their}」，对得起拍 ✅', gapMsg:'我「{their}」，差一档能打。', conflictMsg:'我「{their}」，水平差过大。'},
+    {qIdx:3, label:'教学局', type:'cat', flex:['偶尔'], critical:false,
+      ask:'需要教学局吗？我「{my}」', okMsg:'我「{their}」一致 ✅', flexMsg:'我「{their}」👍', conflictMsg:'我「{their}」，模式不同。'},
+  ],
+  football: [
+    {qIdx:1, label:'几人制', type:'cat', flex:['都行'], critical:true,
+      ask:'几人制我「{my}」', okMsg:'我「{their}」一致 ✅', flexMsg:'我「{their}」👍', conflictMsg:'我「{their}」，凑队对不上。'},
+    {qIdx:2, label:'位置', type:'cat', flex:['随意'], critical:false,
+      ask:'位置我打「{my}」', okMsg:'我「{their}」，互补 ✅', flexMsg:'我「{their}」，能轮换 👍', conflictMsg:'我也「{their}」，位置撞了。'},
+    {qIdx:3, label:'强度', type:'oppose', pairs:[['养生随意','认真竞技']], critical:true,
+      ask:'强度我「{my}」', okMsg:'我「{their}」一致 ✅', conflictMsg:'我「{their}」，强度诉求相反。'},
+  ],
+  swimming: [
+    {qIdx:0, label:'场馆', type:'venue', critical:true,
+      ask:'场馆我去「{my}」', okMsg:'我也去「{their}」 ✅', conflictMsg:'我去「{their}」，场馆不重叠。'},
+    {qIdx:1, label:'泳道速度', type:'ord', order:['慢速道','中速道','快速道'], maxGap:1, critical:true,
+      ask:'泳道我游「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」，差一档可调。', conflictMsg:'我「{their}」，泳速差过大。'},
+    {qIdx:3, label:'目标', type:'oppose', pairs:[['打卡健身','约练进阶']], critical:true,
+      ask:'游泳目标我是「{my}」', okMsg:'我「{their}」一致 ✅', conflictMsg:'我「{their}」，目标完全错位。'},
+  ],
+  cycling: [
+    {qIdx:1, label:'距离', type:'ord', order:['30km以内','30-60km','60-100km','100km+'], maxGap:1, critical:false,
+      ask:'骑行距离我「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」，差一档能合。', conflictMsg:'我「{their}」，距离差过大。'},
+    {qIdx:2, label:'平均时速', type:'ord', order:['<20km/h','20-25km/h','25-30km/h','30+km/h'], maxGap:1, critical:true,
+      ask:'平均时速我「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」，差一档勉强能跟。', conflictMsg:'我「{their}」，时速差≥5km/h，跟不上。'},
+    {qIdx:3, label:'装备类型', type:'cat', critical:false,
+      ask:'车我骑「{my}」', okMsg:'我「{their}」一致 ✅', conflictMsg:'我「{their}」，车型不同节奏不同。'},
+    {qIdx:4, label:'爬坡', type:'ord', order:['平路为主','小坡','中等爬坡','挑战爬坡'], maxGap:1, critical:true,
+      ask:'爬坡接受度我「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」，路线可协调。', conflictMsg:'我「{their}」，难度差无法同行。'},
+  ],
+  hiking: [
+    {qIdx:1, label:'难度', type:'ord', order:['入门级','中级','进阶','挑战级'], maxGap:1, critical:true,
+      ask:'难度我能走「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」，差一档可调。', conflictMsg:'我「{their}」，难度差无法同行。'},
+    {qIdx:2, label:'里程', type:'ord', order:['5km以内','5-15km','15-25km','25km+'], maxGap:1, critical:false,
+      ask:'里程我走「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」，里程稍差。', conflictMsg:'我「{their}」，里程差过大。'},
+    {qIdx:3, label:'过夜露营', type:'cat', flex:['偶尔'], critical:true,
+      ask:'过夜露营我「{my}」', okMsg:'我「{their}」一致 ✅', flexMsg:'我「{their}」👍', conflictMsg:'我「{their}」，过夜意愿冲突。'},
+    {qIdx:4, label:'强度', type:'oppose', pairs:[['轻松游览','认真挑战']], critical:false,
+      ask:'强度我「{my}」', okMsg:'我「{their}」一致 ✅', conflictMsg:'我「{their}」，强度差异大。'},
+  ],
+  volleyball: [
+    {qIdx:1, label:'几人制', type:'cat', flex:['都行'], critical:true,
+      ask:'几人制我「{my}」', okMsg:'我「{their}」一致 ✅', flexMsg:'我「{their}」👍', conflictMsg:'我「{their}」，凑队对不上。'},
+    {qIdx:2, label:'水平', type:'ord', order:['新手','入门','进阶','高手'], maxGap:1, critical:true,
+      ask:'水平我「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」，差一档能打。', conflictMsg:'我「{their}」，水平差过大。'},
+    {qIdx:3, label:'强度', type:'oppose', pairs:[['娱乐','竞技']], critical:true,
+      ask:'强度我「{my}」', okMsg:'我「{their}」一致 ✅', conflictMsg:'我「{their}」，强度诉求相反。'},
+  ],
+  pickleball: [
+    {qIdx:1, label:'单/双打', type:'cat', flex:['都可以'], critical:true,
+      ask:'单双打我「{my}」', okMsg:'我「{their}」一致 ✅', flexMsg:'我「{their}」👍', conflictMsg:'我「{their}」，打法不同。'},
+    {qIdx:2, label:'水平', type:'ord', order:['新手','入门','进阶','高手'], maxGap:1, critical:true,
+      ask:'水平我「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」，差一档能打。', conflictMsg:'我「{their}」，水平差过大。'},
+    {qIdx:3, label:'场地资源', type:'cat', flex:['偶尔'], critical:false,
+      ask:'场地资源我「{my}」', okMsg:'我「{their}」一致 ✅', flexMsg:'我「{their}」👍', conflictMsg:'我「{their}」，场地资源无法共享。'},
+  ],
+  bowling: [
+    {qIdx:1, label:'人数', type:'cat', flex:['随意'], critical:false,
+      ask:'人数我「{my}」', okMsg:'我「{their}」一致 ✅', flexMsg:'我「{their}」👍', conflictMsg:'我「{their}」，人数凑不齐。'},
+    {qIdx:3, label:'模式', type:'oppose', pairs:[['休闲娱乐','认真比赛']], critical:true,
+      ask:'模式我「{my}」', okMsg:'我「{their}」一致 ✅', conflictMsg:'我「{their}」，模式诉求相反。'},
+  ],
+  climbing: [
+    {qIdx:0, label:'岩馆', type:'venue', critical:true,
+      ask:'岩馆我去「{my}」', okMsg:'我也常去「{their}」 ✅', conflictMsg:'我去「{their}」，岩馆不重叠。'},
+    {qIdx:1, label:'难度等级', type:'ord', order:['V0-V2','V3-V5','V6-V8','V8+'], maxGap:1, critical:true,
+      ask:'难度我爬「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」，差一档能爬。', conflictMsg:'我「{their}」，难度差过大。'},
+    {qIdx:2, label:'保护能力', type:'cat', critical:true,
+      ask:'保护能力我「{my}」', okMsg:'我「{their}」一致 ✅', conflictMsg:'我「{their}」，保护能力不匹配。'},
+    {qIdx:3, label:'教学局', type:'cat', flex:['有时候'], critical:false,
+      ask:'要不要教学局？我「{my}」', okMsg:'我「{their}」一致 ✅', flexMsg:'我「{their}」👍', conflictMsg:'我「{their}」，模式不同。'},
+  ],
+  frisbee: [
+    {qIdx:1, label:'几人制', type:'cat', flex:['随意'], critical:true,
+      ask:'几人制我「{my}」', okMsg:'我「{their}」一致 ✅', flexMsg:'我「{their}」👍', conflictMsg:'我「{their}」，凑队对不上。'},
+    {qIdx:2, label:'水平', type:'ord', order:['新手','入门','进阶','高手'], maxGap:1, critical:true,
+      ask:'水平我「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」，差一档能玩。', conflictMsg:'我「{their}」，水平差过大。'},
+    {qIdx:3, label:'强度', type:'oppose', pairs:[['休闲娱乐','认真竞技']], critical:true,
+      ask:'强度我「{my}」', okMsg:'我「{their}」一致 ✅', conflictMsg:'我「{their}」，强度诉求相反。'},
+    {qIdx:4, label:'规则熟悉度', type:'ord', order:['不太了解','基本了解','熟悉'], maxGap:1, critical:false,
+      ask:'规则熟悉度我「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」，差一档没事。', conflictMsg:'我「{their}」，规则熟悉度悬殊。'},
+  ],
+  paddleboard: [
+    {qIdx:1, label:'装备', type:'cat', flex:['部分自有'], critical:false,
+      ask:'装备我「{my}」', okMsg:'我「{their}」一致 ✅', flexMsg:'我「{their}」可以共用 👍', conflictMsg:'我「{their}」，装备不全。'},
+    {qIdx:2, label:'水平', type:'ord', order:['新手','进阶','高手'], maxGap:1, critical:true,
+      ask:'水平我「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」差一档能合。', conflictMsg:'我「{their}」，新手/进阶差无法同行。'},
+    {qIdx:3, label:'教学', type:'cat', flex:['有时候'], critical:false,
+      ask:'要不要教学？我「{my}」', okMsg:'我「{their}」一致 ✅', flexMsg:'我「{their}」👍', conflictMsg:'我「{their}」，模式不同。'},
+  ],
+  orienteering: [
+    {qIdx:1, label:'难度', type:'ord', order:['入门白橙','进阶黄绿','高级红蓝','精英棕黑'], maxGap:1, critical:true,
+      ask:'难度我跑「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」差一档可调。', conflictMsg:'我「{their}」，难度差过大。'},
+    {qIdx:2, label:'距离', type:'ord', order:['3km以内','3-5km','5-10km','10km+'], maxGap:1, critical:false,
+      ask:'距离我「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」差一档。', conflictMsg:'我「{their}」差距大。'},
+    {qIdx:3, label:'组队人数', type:'cat', critical:false,
+      ask:'人数我「{my}」', okMsg:'我「{their}」一致 ✅', conflictMsg:'我「{their}」，组队人数不匹配。'},
+  ],
+  billiards: [
+    {qIdx:1, label:'台型', type:'cat', flex:['都行'], critical:true,
+      ask:'台型我打「{my}」', okMsg:'我「{their}」一致 ✅', flexMsg:'我「{their}」👍', conflictMsg:'我「{their}」，台型偏好不符。'},
+    {qIdx:2, label:'水平', type:'ord', order:['新手','入门','进阶','高手'], maxGap:1, critical:true,
+      ask:'水平我「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」差一档能打。', conflictMsg:'我「{their}」，水平差过大。'},
+  ],
+  yoga: [
+    {qIdx:0, label:'场馆/地点', type:'venue', critical:true,
+      ask:'我在「{my}」上课', okMsg:'我也去「{their}」 ✅', conflictMsg:'我在「{their}」，场馆不重叠。'},
+    {qIdx:1, label:'课程类型', type:'cat', critical:true,
+      ask:'课程类型我练「{my}」', okMsg:'我「{their}」一致 ✅', conflictMsg:'我「{their}」，课程类型不同。'},
+    {qIdx:2, label:'强度', type:'ord', order:['放松级','中等强度','高强度'], maxGap:1, critical:true,
+      ask:'强度我「{my}」', okMsg:'我「{their}」一致 ✅', gapMsg:'我「{their}」差一档能合。', conflictMsg:'我「{their}」，强度差无法同练。'},
+  ],
+};
+
+// ============================================================
+// TECH_DIMS WEIGHTS — each sport's dims sum to 10 points.
+// No single dim is a hard veto; everything is weighted percentage.
+// ============================================================
+const TECH_WEIGHTS = {
+  badminton:[3,5,2], tennis:[3,5,2], basketball:[5,5], running:[6,4],
+  fitness:[3,5,2], skiing:[2,3,1,2,2], pingpong:[3,5,2], football:[3,2,5],
+  swimming:[2,4,4], cycling:[2,4,1,3], hiking:[3,2,2,3], volleyball:[3,4,3],
+  pickleball:[3,5,2], bowling:[3,7], climbing:[2,4,3,1], frisbee:[2,4,3,1],
+  paddleboard:[1,6,3], orienteering:[5,3,2], billiards:[4,6], yoga:[3,3,4],
+};
+Object.entries(TECH_WEIGHTS).forEach(([k, arr]) => {
+  (TECH_DIMS[k] || []).forEach((d, i) => { d.weight = arr[i] || 1; });
+});
+
+// Verdict → fraction-of-weight earned. NO verdict is a hard veto.
+const VERDICT_PCT = { match:1.0, flex:0.8, gap:0.5, conflict:0, skip:null };
+
+// ============================================================
+// COMPARISON ENGINE — real data-driven matching
+// ============================================================
+// Split a possibly-multi value ("单打、双打") into a list. Single values come back as 1-element arrays.
+function splitMulti(v) {
+  if (v == null) return [];
+  return String(v).split(/[、,，]/).map(s=>s.trim()).filter(Boolean);
+}
+
+function compareDimension(dim, myA, theirA) {
+  // Empty answer → skip
+  if (!myA || !theirA) return {verdict:'skip', myA, theirA};
+  const flex = dim.flex || [];
+  // Generic flex tokens always considered flexible regardless of dim config
+  const GLOBAL_FLEX = ['都可以','都行','看情况','随意'];
+  const isFlexVal = v => flex.includes(v) || GLOBAL_FLEX.includes(v);
+
+  const myList = splitMulti(myA);
+  const theirList = splitMulti(theirA);
+  const myFlex = myList.some(isFlexVal);
+  const theirFlex = theirList.some(isFlexVal);
+
+  if (dim.type === 'cat') {
+    // Set-intersection match
+    const shared = myList.filter(v => theirList.includes(v));
+    if (shared.length) return {verdict:'match', myA, theirA};
+    if (myFlex || theirFlex) return {verdict:'flex', myA, theirA};
+    return {verdict:'conflict', myA, theirA};
+  }
+
+  if (dim.type === 'ord') {
+    // Find best (minimum) gap across all cross-pairs
+    const shared = myList.filter(v => theirList.includes(v));
+    if (shared.length) return {verdict:'match', myA, theirA};
+    if (myFlex || theirFlex) return {verdict:'flex', myA, theirA};
+    let minGap = Infinity;
+    for (const m of myList) {
+      const mi = dim.order.indexOf(m); if (mi < 0) continue;
+      for (const t of theirList) {
+        const ti = dim.order.indexOf(t); if (ti < 0) continue;
+        minGap = Math.min(minGap, Math.abs(mi - ti));
+      }
+    }
+    if (minGap === Infinity) return {verdict:'flex', myA, theirA};
+    if (minGap === 0) return {verdict:'match', myA, theirA};
+    if (minGap <= (dim.maxGap || 1)) return {verdict:'gap', myA, theirA, gap:minGap};
+    return {verdict:'conflict', myA, theirA, gap:minGap};
+  }
+
+  if (dim.type === 'venue') {
+    // Substring overlap (≥2 chars match) counts as same venue
+    const a = myA.trim(), b = theirA.trim();
+    if (!a || !b) return {verdict:'skip', myA, theirA};
+    if (a === b) return {verdict:'match', myA, theirA};
+    // Token overlap
+    const tokenize = s => s.split(/[\s，、,/·]+/).filter(t=>t.length>=2);
+    const ta = tokenize(a), tb = tokenize(b);
+    const shared = ta.filter(t => tb.some(x => x.includes(t) || t.includes(x)));
+    if (shared.length) return {verdict:'match', myA, theirA};
+    if (a.includes(b) || b.includes(a)) return {verdict:'match', myA, theirA};
+    return {verdict:'conflict', myA, theirA};
+  }
+
+  if (dim.type === 'oppose') {
+    // Multi-aware: shared value → match; any pair on opposing sides → conflict; else flex
+    const sharedOpp = myList.filter(v => theirList.includes(v));
+    if (sharedOpp.length) return {verdict:'match', myA, theirA};
+    const pairs = dim.pairs || [];
+    const hit = myList.some(m => theirList.some(t => pairs.some(([x,y]) => (m===x && t===y) || (m===y && t===x))));
+    if (hit) return {verdict:'conflict', myA, theirA};
+    return {verdict:'flex', myA, theirA};
+  }
+
+  return {verdict:'skip', myA, theirA};
+}
+
+// Run all technical dims for a sport and return ordered comparison results
+function compareProfiles(sportKey, myAnswers, theirAnswers) {
+  const dims = TECH_DIMS[sportKey] || [];
+  const results = [];
+  let firstCriticalConflict = null;
+  for (const dim of dims) {
+    const myA = myAnswers[dim.qIdx]?.a || '';
+    const theirA = theirAnswers[dim.qIdx]?.a || '';
+    const cmp = compareDimension(dim, myA, theirA);
+    const entry = {dim, ...cmp};
+    results.push(entry);
+    if (cmp.verdict === 'conflict' && dim.critical && !firstCriticalConflict) {
+      firstCriticalConflict = entry;
+    }
+  }
+  return {results, firstCriticalConflict};
+}
+
+// Criteria from Sheet_20260608: hard conditions to cover + red lines per sport
+const SPORT_CRITERIA = {
+  badminton:{hard:['时间','场馆/区域','单打或双打','水平段位','缺几人'],redLines:[['无共同时段'],['水平差≥2段']],rounds:[2,3]},
+  tennis:{hard:['时间','场地','单/双打','NTRP水平','有无球场资源'],redLines:[['时间全冲突'],['水平差过大']],rounds:[2,3]},
+  basketball:{hard:['时间','场馆','几人制','强度'],redLines:[['凑不齐人数'],['强度诉求相反']],rounds:[2,3]},
+  running:{hard:['时间','路线/区域','配速','距离'],redLines:[['配速差太多'],['区域不重叠']],rounds:[2,2]},
+  fitness:{hard:['时间','位置','训练类型','是否需搭子保护'],redLines:[['位置不重叠'],['目标完全错位']],rounds:[2,2]},
+  skiing:{hard:['雪场','日期','雪道难度','装备','是否过夜','拼车'],redLines:[['雪场不同且不愿换'],['日期冲突'],['难度差到不能同道']],rounds:[5,7]},
+  pingpong:{hard:['时间','球馆/区域','单/双打','水平段位','教学局'],redLines:[['时间完全冲突'],['水平差过大']],rounds:[2,3]},
+  football:{hard:['时间','场地','人数','位置偏好','强度'],redLines:[['凑不齐队伍'],['强度诉求相反'],['位置需求完全冲突']],rounds:[3,4]},
+  swimming:{hard:['时间','场馆','泳道偏好','泳姿','目标'],redLines:[['场馆不重叠'],['泳道速度差过大'],['目标完全错位']],rounds:[2,2]},
+  cycling:{hard:['时间','路线/目的地','距离','平均时速','难度','装备'],redLines:[['路线完全不重叠'],['时速差≥5km/h'],['难度差无法同行']],rounds:[3,4]},
+  hiking:{hard:['时间','路线/山峰','难度等级','里程','是否过夜','体力强度'],redLines:[['路线不同且不愿调整'],['难度差无法同行'],['过夜意愿冲突']],rounds:[4,6]},
+  volleyball:{hard:['时间','场馆','几人制','水平段位','强度'],redLines:[['凑不齐人数'],['水平差过大'],['强度诉求相反']],rounds:[2,3]},
+  pickleball:{hard:['时间','场地','单/双打','水平段位','场地资源'],redLines:[['时间冲突'],['水平差过大'],['场地资源无法共享']],rounds:[2,3]},
+  bowling:{hard:['时间','场馆','人数','局数','模式'],redLines:[['时间完全冲突'],['人数凑不齐'],['模式诉求相反']],rounds:[1,2]},
+  climbing:{hard:['时间','岩馆','难度等级','保护能力','教学局'],redLines:[['岩馆不重叠'],['难度差过大'],['保护能力不匹配']],rounds:[2,3]},
+  frisbee:{hard:['时间','场地','人数','水平段位','强度','是否懂规则'],redLines:[['凑不齐人数'],['水平差过大'],['强度诉求相反']],rounds:[3,4]},
+  paddleboard:{hard:['时间','水域/场地','装备','新手/进阶','教学局'],redLines:[['水域不重叠'],['新手/进阶差无法同行'],['装备不全']],rounds:[3,4]},
+  orienteering:{hard:['时间','场地/路线','距离/难度','组队人数','目标'],redLines:[['场地不重叠'],['难度差过大'],['组队人数不匹配']],rounds:[2,3]},
+  billiards:{hard:['时间','球房','台型','水平段位','局数'],redLines:[['时间冲突'],['台型偏好不符'],['水平差过大']],rounds:[1,2]},
+  yoga:{hard:['时间','场馆/地点','课程类型','强度等级','是否新手友好'],redLines:[['时间冲突'],['场馆不重叠'],['强度差无法同练']],rounds:[1,2]},
+};
+const SPORT_STATS = {
+  badminton:{days:47,hours:38.5,goals:12},tennis:{days:63,hours:58,goals:21},basketball:{days:128,hours:96.5,goals:45},
+  running:{days:89,hours:74.2,goals:33},fitness:{days:112,hours:152,goals:56},skiing:{days:18,hours:36,goals:8},
+  pingpong:{days:35,hours:22.5,goals:9},football:{days:52,hours:48,goals:18},swimming:{days:44,hours:33,goals:14},
+  cycling:{days:31,hours:67.5,goals:11},hiking:{days:22,hours:44,goals:7},volleyball:{days:19,hours:15.5,goals:6},
+  pickleball:{days:8,hours:6,goals:3},bowling:{days:12,hours:9.5,goals:4},climbing:{days:26,hours:31,goals:10},
+  frisbee:{days:15,hours:12,goals:5},paddleboard:{days:6,hours:8.5,goals:2},orienteering:{days:9,hours:18,goals:4},
+  billiards:{days:23,hours:17.5,goals:8},yoga:{days:61,hours:45.5,goals:24},
+};
+
+// ============================================================
+// STORAGE (Firebase if configured, else localStorage)
+// ============================================================
+let db = null;
+function initFirebase() {
+  if (!FIREBASE_ENABLED) return;
+  try {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.firestore();
+    console.log('Firebase connected');
+  } catch(e) { console.warn('Firebase init failed:', e); db = null; }
+}
+
+function ls(k){ try{return JSON.parse(localStorage.getItem(k));}catch{return null;} }
+function lsSet(k,v){ localStorage.setItem(k,JSON.stringify(v)); }
+
+function genCode(n=6){ return Math.random().toString(36).slice(2,2+n).toUpperCase(); }
+
+// Save current user profile to pool
+async function saveProfile() {
+  const profile = buildProfileObj();
+  lsSet('mp_profile_'+S.uid, profile);
+  if (db) {
+    try { await db.collection('pools').doc(POOL_ID).collection('users').doc(S.uid).set(profile); }
+    catch(e){ console.warn('Firestore write failed:', e); }
+  } else {
+    const users = ls('mp_pool_users') || [];
+    const idx = users.findIndex(u=>u.uid===S.uid);
+    if(idx>=0) users[idx]=profile; else users.push(profile);
+    lsSet('mp_pool_users', users);
+  }
+}
+
+async function getPoolUsers() {
+  if (db) {
+    try {
+      const snap = await db.collection('pools').doc(POOL_ID).collection('users').get();
+      return snap.docs.map(d=>d.data()).filter(u=>u.uid!==S.uid);
+    } catch(e) { console.warn('Firestore read failed:', e); }
+  }
+  return (ls('mp_pool_users')||[]).filter(u=>u.uid!==S.uid);
+}
+
+async function getPoolCount() {
+  if (db) {
+    try {
+      const snap = await db.collection('pools').doc(POOL_ID).collection('users').get();
+      return snap.size;
+    } catch(e) {}
+  }
+  return (ls('mp_pool_users')||[]).length;
+}
+
+async function saveA2AChat(chat) {
+  S.a2aChats.unshift(chat);
+  lsSet('mp_chats_'+S.uid, S.a2aChats);
+  if (db) {
+    try { await db.collection('pools').doc(POOL_ID).collection('chats').doc(chat.id).set(chat); }
+    catch(e){}
+  }
+}
+
+function buildProfileObj() {
+  return {
+    uid: S.uid, nickname: S.nickname, updatedAt: Date.now(),
+    sports: S.selectedSports.map(k => ({key:k, answers:(S.sportProg[k]||{}).answers||[]})),
+    timePref: S.timePref,
+  };
+}
+
+function calcScore(me, other) {
+  const myKeys = me.sports.map(s=>s.key);
+  const otherKeys = (other.sports||[]).map(s=>s.key);
+  const shared = myKeys.filter(k=>otherKeys.includes(k));
+  if (!shared.length) return { score: 0, shared: [] };
+  let score = shared.length * 20;
+  shared.forEach(key => {
+    const myS = me.sports.find(s=>s.key===key);
+    const otherS = (other.sports||[]).find(s=>s.key===key);
+    if (!myS || !otherS) return;
+    const qs = SPORT_QS[key]||[];
+    (myS.answers||[]).forEach((ans,i) => {
+      const oa = (otherS.answers||[])[i]?.a||'';
+      if (!ans.a || !oa) return;
+      if (qs[i]?.type==='chips') {
+        if (ans.a===oa) score+=12;
+        else if (['都可以','都行','看情况'].some(x=>ans.a===x||oa===x)) score+=5;
+      } else {
+        const words=ans.a.split(/[\s，、]/);
+        if (words.some(w=>w.length>1&&oa.includes(w))) score+=8;
+      }
+    });
+  });
+  const d1=me.timePref?.days||[], d2=other.timePref?.days||[];
+  if (d1.some(d=>d2.includes(d))) score+=8;
+  const t1=me.timePref?.times||[], t2=other.timePref?.times||[];
+  if (t1.some(t=>t2.includes(t))) score+=8;
+  return { score: Math.min(score, 100), shared };
+}
+
+// ============================================================
+// STATE
+// ============================================================
+const S = {
+  screen: 'splash', tab: 'ai', autoFindStarted: false, unmatchedOpen: false,
+  scanProgress: null, // {current,total,name} when scanning, null when idle
+  scanCompleted: false,
+  aiPendingSearch: null, // {sportKey} after profile analysis, waiting for user's focus reply
+  uid: ls('mp_uid') || (()=>{ const id='u_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); lsSet('mp_uid',id); return id; })(),
+  nickname: '', obStep: 'sport-select',
+  selectedSports: [], curSportKey: null, sportProg: {}, pendingText: '',
+  timePref: { days:[], times:[] },
+  meSportTab: null, poolCount: 0,
+  curChat: null,
+  aiMsgs: [],
+  a2aChats: ls('mp_chats_'+(ls('mp_uid')||'')) || [],
+};
+
+// AI page initial state
+S.aiMsgs = [
+  { type:'sys', c:'AI 分身帮你探索同频的运动 friend！' },
+  { type:'ai', c:'Hi！我是你的运动分身 ✦\n\n你想找哪个运动的同频朋友？告诉我运动名，我先结合你的档案分析你想找的画像，再带着重点去和合适的人一一聊。' },
+];
+
+// Load saved profile
+const saved = ls('mp_profile_'+S.uid);
+if (saved) {
+  S.nickname = saved.nickname || '';
+  S.selectedSports = (saved.sports||[]).map(s=>s.key);
+  S.sportProg = Object.fromEntries((saved.sports||[]).map(s=>[s.key,{answers:s.answers||[],complete:true}]));
+  S.timePref = saved.timePref || {days:[],times:[]};
+  S.meSportTab = S.selectedSports[0]||null;
+  S.screen = 'main';
+}
+
+// ============================================================
+// CLASSMATE BULK-IMPORT — fetch classmates-pool.json once and seed
+// the local pool. Runs only if the pool is empty (so users can also
+// add themselves via normal onboarding without conflicts).
+// ============================================================
+async function seedClassmatesPool() {
+  // Mark flag once loaded to avoid re-fetching on every reload
+  if (ls('mp_classmates_loaded') === true) return;
+  try {
+    const resp = await fetch('./classmates-pool.json', {cache: 'no-store'});
+    if (!resp.ok) return;
+    const classmates = await resp.json();
+    if (!Array.isArray(classmates) || classmates.length === 0) return;
+
+    if (db) {
+      // Firestore path: write each user (skip if exists is fine for demo)
+      for (const u of classmates) {
+        try { await db.collection('pools').doc(POOL_ID).collection('users').doc(u.uid).set(u); } catch(e){}
+      }
+    } else {
+      // localStorage path: merge into mp_pool_users (de-dup by uid)
+      const existing = ls('mp_pool_users') || [];
+      const have = new Set(existing.map(u => u.uid));
+      const merged = [...existing, ...classmates.filter(u => !have.has(u.uid))];
+      lsSet('mp_pool_users', merged);
+    }
+    lsSet('mp_classmates_loaded', true);
+    console.log(`[Matchpoint] seeded ${classmates.length} classmates into pool`);
+    // Refresh pool count in state
+    S.poolCount = await getPoolCount();
+    if (S.screen === 'main') render();
+  } catch (e) {
+    console.warn('[Matchpoint] classmates-pool.json not available:', e.message);
+  }
+}
+
+// Load pool count in background and seed classmates if available
+seedClassmatesPool().then(() => getPoolCount()).then(n => { S.poolCount = n; if (S.screen==='main') render(); });
+
+// ============================================================
+// UTILS
+// ============================================================
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+function el(tag, attrs={}, kids=[]) {
+  const e = document.createElement(tag);
+  Object.entries(attrs).forEach(([k,v]) => {
+    if (k==='class') e.className=v;
+    else if (k==='html') e.innerHTML=v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2).toLowerCase(),v);
+    else e.setAttribute(k,v);
+  });
+  [kids].flat().forEach(c=>c&&e.appendChild(typeof c==='string'?document.createTextNode(c):c));
+  return e;
+}
+function toast(msg) {
+  const t=el('div',{class:'toast'},msg);
+  $('#toastWrap').appendChild(t);
+  setTimeout(()=>t.remove(),2500);
+}
+function tickClock(){ const e=$('#sbTime');if(!e)return;const d=new Date();e.textContent=String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+setInterval(tickClock,30000); tickClock();
+
+// ============================================================
+// RENDER
+// ============================================================
+function render() {
+  const pc=$('#pageContainer'), tb=$('#tabBar');
+  pc.innerHTML='';
+  if (S.screen==='splash') { tb.style.display='none'; renderSplash(pc); }
+  else if (S.screen==='onboarding') { tb.style.display='none'; renderOB(pc); }
+  else {
+    tb.style.display='flex';
+    $$('#tabBar .tab-item').forEach(i=>i.classList.toggle('active',i.dataset.tab===S.tab));
+    const dot=$('#chatDot');
+    if(dot) dot.style.display=S.a2aChats.some(c=>c.unread)?'block':'none';
+    if(S.tab==='chats') S.curChat?renderChatDetail(pc):renderChats(pc);
+    else if(S.tab==='ai') renderAI(pc);
+    else if(S.tab==='me') renderMe(pc);
+  }
+  renderDynIsland();
+}
+
+function renderDynIsland() {
+  const root = $('#dynIsland');
+  if (!root) return;
+  root.innerHTML = '';
+  const p = S.scanProgress;
+  if (!p) return;
+  const pct = p.total > 0 ? Math.round((p.current / p.total) * 100) : 0;
+  const pill = el('div', {class:'dyn-island'});
+  const spLabel = p.sport ? `${p.sport.e} ${p.sport.n}` : '';
+  if (p.done) {
+    pill.appendChild(el('div', {class:'di-done', html:'✅'}));
+    const txtCol = el('div', {style:'flex:1;'});
+    txtCol.appendChild(el('div', {class:'di-text', html:`扫描完成 · ${p.matched} 位${spLabel?' '+spLabel:''}同频朋友`}));
+    txtCol.appendChild(el('div', {class:'di-sub', html:'已写入「Chats」'}));
+    pill.appendChild(txtCol);
+  } else {
+    pill.appendChild(el('div', {class:'di-spinner'}));
+    const txtCol = el('div', {style:'flex:1;min-width:0;'});
+    txtCol.appendChild(el('div', {class:'di-text', html:`${spLabel?spLabel+' · ':''}${p.current}/${p.total}`}));
+    txtCol.appendChild(el('div', {class:'di-sub', html:p.name ? `分身正在和 ${p.name} 聊` : '准备中...'}));
+    const bar = el('div', {class:'di-bar'});
+    bar.appendChild(el('div', {class:'di-bar-fill', style:`width:${pct}%;`}));
+    txtCol.appendChild(bar);
+    pill.appendChild(txtCol);
+  }
+  root.appendChild(pill);
+}
+
+document.addEventListener('DOMContentLoaded',()=>{
+  initFirebase();
+  $$('#tabBar .tab-item').forEach(item=>{
+    item.addEventListener('click',()=>{ const t=item.dataset.tab;if(t!==S.tab){S.tab=t;S.curChat=null;render();} });
+  });
+  render();
+});
+
+// ============================================================
+// SPLASH
+// ============================================================
+function renderSplash(root) {
+  const pg=el('div',{class:'splash slide-up'});
+  pg.appendChild(el('div',{class:'splash-logo',html:'🎾'}));
+  pg.appendChild(el('div',{class:'splash-brand',html:'Matchpoint'}));
+  pg.appendChild(el('div',{class:'splash-sub',html:'填写真实运动数据 · AI 分身替你找搭子'}));
+
+  if (!FIREBASE_ENABLED) {
+    pg.appendChild(el('div',{class:'firebase-notice',html:'💡 <strong>演示模式</strong>（仅本设备）<br>如需40人真实跨设备匹配，在代码顶部填入 Firebase 配置。<br><a href="https://console.firebase.google.com/" target="_blank">→ Firebase 控制台（免费）</a>'}));
+  }
+
+  pg.appendChild(el('div',{class:'splash-field'},[el('label',{class:'splash-label',html:'你的昵称'}),el('input',{class:'text-inp',placeholder:'输入你的名字',type:'text',id:'splashName'})]));
+  pg.appendChild(el('button',{class:'btn',onclick:()=>{
+    const n=$('#splashName')?.value?.trim(); if(!n)return;
+    S.nickname=n; seedLocalPool(); startOB();
+  }},'开始填写 →'));
+  pg.appendChild(el('div',{class:'splash-hint',html:'约 3 分钟 · 填完后 AI 分身自动帮你在班级里找搭子'}));
+  root.appendChild(pg);
+  setTimeout(()=>$('#splashName')?.focus(),80);
+}
+
+function startOB() { S.screen='onboarding'; S.obStep='sport-select'; render(); }
+
+// Pre-seed local pool for demo (when Firebase not configured)
+function seedLocalPool() {
+  if ((ls('mp_pool_users')||[]).length > 0) return;
+  lsSet('mp_pool_users', [
+    {uid:'d1',nickname:'小雨',sports:[{key:'tennis',answers:[{q:'在哪里打网球？',a:'朝阳公园'},{q:'偏好单打还是双打？',a:'单打'},{q:'NTRP水平？',a:'3.0-3.5'},{q:'有球场资源？',a:'偶尔有'}]},{key:'badminton',answers:[{q:'一般在哪里打羽毛球？',a:'朝阳区'},{q:'偏好单打还是双打？',a:'双打'},{q:'水平大概是？',a:'进阶'},{q:'约局缺几人？',a:'缺1人'}]}],timePref:{days:['周末'],times:['下午']},updatedAt:Date.now()-3600000},
+    {uid:'d2',nickname:'Alex',sports:[{key:'basketball',answers:[{q:'在哪里打篮球？',a:'国贸篮球馆'},{q:'偏好几人制？',a:'5V5'},{q:'打球强度偏好？',a:'认真竞技'}]},{key:'tennis',answers:[{q:'在哪里打网球？',a:'朝阳公园'},{q:'偏好单打还是双打？',a:'单打'},{q:'NTRP水平？',a:'3.5-4.0'},{q:'有球场资源？',a:'有'}]}],timePref:{days:['周中'],times:['晚上']},updatedAt:Date.now()-7200000},
+    {uid:'d3',nickname:'晴天',sports:[{key:'running',answers:[{q:'在哪里跑步？',a:'奥森公园'},{q:'配速大概？',a:'5-6分'},{q:'跑多少公里？',a:'5-10km'}]},{key:'badminton',answers:[{q:'一般在哪里打羽毛球？',a:'朝阳区'},{q:'偏好单打还是双打？',a:'单打'},{q:'水平大概是？',a:'入门'},{q:'约局缺几人？',a:'缺1人'}]}],timePref:{days:['周末'],times:['上午']},updatedAt:Date.now()-10800000},
+    {uid:'d4',nickname:'Lion',sports:[{key:'skiing',answers:[{q:'偏好哪个雪场？',a:'崇礼系'},{q:'雪道难度？',a:'红道'},{q:'装备状况？',a:'全套自有'},{q:'愿意过夜？',a:'是'},{q:'愿意拼车？',a:'是'}]}],timePref:{days:['周末'],times:['上午']},updatedAt:Date.now()-14400000},
+    {uid:'d5',nickname:'Mini',sports:[{key:'yoga',answers:[{q:'在哪里上课？',a:'三里屯瑜伽馆'},{q:'课程类型？',a:'流瑜伽'},{q:'强度偏好？',a:'中等强度'},{q:'新手友好需求？',a:'有基础'}]},{key:'swimming',answers:[{q:'在哪里游泳？',a:'国家游泳中心'},{q:'偏好泳道？',a:'中速道'},{q:'主要泳姿？',a:'自由泳'},{q:'游泳目标？',a:'提升技术'}]}],timePref:{days:['周中','周末'],times:['下午']},updatedAt:Date.now()-18000000},
+  ]);
+}
+
+// ============================================================
+// ONBOARDING
+// ============================================================
+function renderOB(root) {
+  if (S.obStep==='done') { renderOBDone(root); return; }
+  const pg=el('div',{class:'ob-page'});
+  if (S.selectedSports.length>0 && S.obStep==='sport-qa') {
+    const top=el('div',{class:'ob-top'});
+    const tabs=el('div',{class:'ob-tabs'});
+    S.selectedSports.forEach(key=>{
+      const sp=SPORTS.find(s=>s.key===key), pr=S.sportProg[key]||{};
+      const tab=el('div',{class:'ob-tab'+(S.curSportKey===key?' active':'')+(pr.complete?' done':''),onclick:()=>{S.curSportKey=key;render();}},[el('span',{html:sp.e}),el('span',{html:sp.n})]);
+      if(pr.complete) tab.appendChild(el('div',{class:'ob-done-dot',html:'✓'}));
+      tabs.appendChild(tab);
+    });
+    top.appendChild(tabs);
+    if (S.curSportKey && !(S.sportProg[S.curSportKey]||{}).complete) {
+      const pr=S.sportProg[S.curSportKey]||{}, qs=SPORT_QS[S.curSportKey]||[];
+      top.appendChild(el('div',{class:'ob-progress',html:`硬条件 ${(pr.answers||[]).length}/${qs.length}`}));
+    }
+    pg.appendChild(top);
+  }
+  const chat=el('div',{class:'ob-chat',id:'obChat'});
+  if(S.obStep==='sport-select') renderOBSelect(chat);
+  else if(S.obStep==='sport-qa') renderOBQA(chat);
+  else if(S.obStep==='time-pref') renderOBTime(chat);
+  pg.appendChild(chat); root.appendChild(pg);
+  requestAnimationFrame(()=>{ const c=$('#obChat');if(c)c.scrollTop=c.scrollHeight; });
+}
+
+function bMsg(t){ const w=el('div',{class:'msg-bot slide-up'});w.appendChild(el('div',{class:'bot-ava',html:'🤖'}));w.appendChild(el('div',{class:'bubble-bot',html:t.replace(/\n/g,'<br>')}));return w; }
+function uMsg(t){ return el('div',{class:'msg-user slide-up'},[el('div',{class:'bubble-user',html:t})]); }
+
+function renderOBSelect(chat) {
+  chat.appendChild(bMsg(`Hello ${S.nickname}，welcome to Matchpoint！🎉\n\n请选择你感兴趣的运动（可多选）：`));
+  const grid=el('div',{class:'sport-grid'});
+  SPORTS.forEach(sp=>{
+    grid.appendChild(el('div',{class:'sport-card'+(S.selectedSports.includes(sp.key)?' sel':''),onclick:()=>{const i=S.selectedSports.indexOf(sp.key);if(i>=0)S.selectedSports.splice(i,1);else S.selectedSports.push(sp.key);render();}},[el('div',{class:'se',html:sp.e}),el('div',{html:sp.n})]));
+  });
+  chat.appendChild(grid);
+  if(S.selectedSports.length>0){
+    const names=S.selectedSports.map(k=>SPORTS.find(s=>s.key===k)).map(s=>s.e+s.n).join('  ');
+    chat.appendChild(uMsg(`已选：${names}`));
+    chat.appendChild(bMsg(`好的！已选 ${S.selectedSports.length} 个运动，确认后逐一填写偏好。`));
+    chat.appendChild(el('button',{class:'btn',style:'max-width:200px;margin:4px auto;display:block;',onclick:()=>{S.selectedSports.forEach(k=>{if(!S.sportProg[k])S.sportProg[k]={answers:[],complete:false};});S.curSportKey=S.selectedSports[0];S.obStep='sport-qa';render();}},'确认选择 →'));
+  }
+}
+
+function renderOBQA(chat) {
+  const key=S.curSportKey,sp=SPORTS.find(s=>s.key===key);
+  const qs=SPORT_QS[key]||[],pr=S.sportProg[key]||{answers:[],complete:false},ans=pr.answers||[];
+  if(ans.length===0){ chat.appendChild(bMsg(`好的，聊聊 ${sp.e} ${sp.n}！\n\n${qs[0].q}`)); }
+  else {
+    ans.forEach((a,i)=>{ chat.appendChild(bMsg(qs[i].q)); chat.appendChild(uMsg(a.a)); });
+    if(pr.complete){
+      chat.appendChild(bMsg(`${sp.e} ${sp.n} 采集完成 ✅\n\n🛡️ ${SPORT_REDLINES[key]}`));
+      const nk=S.selectedSports.find(k=>{const p=S.sportProg[k]||{};return!p.complete;});
+      if(nk){const ns=SPORTS.find(s=>s.key===nk);chat.appendChild(el('button',{class:'btn',style:'max-width:210px;margin:6px auto;display:block;',onclick:()=>{S.curSportKey=nk;render();}},`继续：${ns.e} ${ns.n} →`));}
+      else{chat.appendChild(el('button',{class:'btn',style:'max-width:210px;margin:6px auto;display:block;',onclick:()=>{S.obStep='time-pref';render();}},'最后一步 →'));}
+      return;
+    }
+    const q=qs[ans.length]; chat.appendChild(bMsg(q.q)); renderWidget(chat,q,key); return;
+  }
+  renderWidget(chat,qs[0],key);
+}
+// Tokens that act as "exclusive flexible/wildcard" choices in multi-select chips.
+// Selecting one of these clears the rest; selecting another option clears these.
+const FLEX_TOKENS = new Set(['都可以','都行','看情况','随意']);
+
+function renderWidget(chat,q,key){
+  if(q.type==='chips'){
+    const cs=el('div',{class:'chips'});
+    if (q.multi) {
+      // Multi-select: track in-progress selection per (sport,qIdx)
+      const qIdx = (S.sportProg[key]?.answers||[]).length;
+      if (!S.tmpMulti) S.tmpMulti = {};
+      const tmpKey = key + '_' + qIdx;
+      const sel = S.tmpMulti[tmpKey] || [];
+      q.opts.forEach(o => {
+        cs.appendChild(el('div',{
+          class:'chip'+(sel.includes(o)?' sel':''),
+          onclick:()=>{
+            let cur = (S.tmpMulti[tmpKey]||[]).slice();
+            const isFlex = FLEX_TOKENS.has(o);
+            if (isFlex) {
+              cur = sel.includes(o) ? [] : [o];
+            } else {
+              cur = cur.filter(x => !FLEX_TOKENS.has(x));
+              const i = cur.indexOf(o);
+              if (i>=0) cur.splice(i,1); else cur.push(o);
+            }
+            S.tmpMulti[tmpKey] = cur;
+            render();
+          }
+        }, o));
+      });
+      chat.appendChild(cs);
+      // Hint + confirm button
+      chat.appendChild(el('div',{style:'font-size:11px;color:#aaa;margin:6px 2px;',html:'可多选'}));
+      if (sel.length > 0) {
+        chat.appendChild(el('button',{
+          class:'btn',
+          style:'max-width:200px;margin:6px auto;display:block;',
+          onclick:()=>{
+            const joined = sel.join('、');
+            delete S.tmpMulti[tmpKey];
+            submitAns(joined, key);
+          }
+        }, '下一步 →'));
+      }
+    } else {
+      q.opts.forEach(o=>cs.appendChild(el('div',{class:'chip',onclick:()=>submitAns(o,key)},o)));
+      chat.appendChild(cs);
+    }
+  } else {
+    const row=el('div',{class:'ob-text-row'});
+    const inp=el('input',{class:'ob-text-input',placeholder:q.ph||'输入你的回答',type:'text'});
+    inp.value=S.pendingText;
+    inp.addEventListener('input',e=>S.pendingText=e.target.value);
+    inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&S.pendingText.trim())submitAns(S.pendingText.trim(),key);});
+    row.appendChild(inp); row.appendChild(el('button',{class:'ob-save',onclick:()=>{if(S.pendingText.trim())submitAns(S.pendingText.trim(),key);}},'保存'));
+    chat.appendChild(row); setTimeout(()=>inp.focus(),50);
+  }
+}
+function submitAns(a,key){
+  const pr=S.sportProg[key],qs=SPORT_QS[key]||[];
+  pr.answers.push({q:qs[pr.answers.length].q,a}); S.pendingText='';
+  if(pr.answers.length>=qs.length)pr.complete=true;
+  render();
+}
+function renderOBTime(chat){
+  // Per-day time slots: timeByDay = {'周中': ['晚上'], '周末': ['上午','下午']}
+  // The flat `times` array is a union of all selected slots (for legacy matching).
+  if (!S.timePref.timeByDay) S.timePref.timeByDay = {};
+  const flatten = () => {
+    const s = new Set();
+    Object.values(S.timePref.timeByDay).forEach(arr => arr.forEach(x => s.add(x)));
+    S.timePref.times = [...s];
+  };
+
+  chat.appendChild(bMsg('最后一问：你周中/周末都什么时候方便运动？（可分别选）'));
+
+  // Days picker — multi-select
+  if (S.timePref.days.length > 0) chat.appendChild(uMsg(S.timePref.days.join('、')));
+  const daysRow = el('div',{class:'chips'});
+  ['周中','周末','都可以'].forEach(d=>{
+    const isSel = (d==='都可以') ? (S.timePref.days.length===2) : S.timePref.days.includes(d);
+    daysRow.appendChild(el('div',{
+      class:'chip'+(isSel?' sel':''),
+      onclick:()=>{
+        if (d==='都可以') S.timePref.days=['周中','周末'];
+        else {
+          const arr = S.timePref.days.filter(x=>x!=='都可以');
+          const i = arr.indexOf(d);
+          if (i>=0) arr.splice(i,1); else arr.push(d);
+          S.timePref.days = arr;
+        }
+        // Drop timeByDay entries for unselected days
+        Object.keys(S.timePref.timeByDay).forEach(k=>{
+          if (!S.timePref.days.includes(k)) delete S.timePref.timeByDay[k];
+        });
+        flatten();
+        render();
+      }
+    }, d));
+  });
+  chat.appendChild(daysRow);
+  if (S.timePref.days.length === 0) return;
+
+  // For each selected day, render a SEPARATE multi-select row.
+  // Order: 周中 first, then 周末.
+  const orderedDays = ['周中','周末'].filter(d => S.timePref.days.includes(d));
+  let allComplete = true;
+  for (const day of orderedDays) {
+    chat.appendChild(bMsg(`${day}什么时段？（可多选）`));
+    const sel = S.timePref.timeByDay[day] || [];
+    if (sel.length > 0) chat.appendChild(uMsg(sel.join('、')));
+    const row = el('div',{class:'chips'});
+    ['上午','下午','晚上','都可以'].forEach(t=>{
+      const isSel = (t==='都可以') ? (sel.length===3) : sel.includes(t);
+      row.appendChild(el('div',{
+        class:'chip'+(isSel?' sel':''),
+        onclick:()=>{
+          let cur = (S.timePref.timeByDay[day] || []).slice();
+          if (t==='都可以') {
+            cur = (cur.length===3) ? [] : ['上午','下午','晚上'];
+          } else {
+            cur = cur.filter(x=>['上午','下午','晚上'].includes(x));
+            const i = cur.indexOf(t);
+            if (i>=0) cur.splice(i,1); else cur.push(t);
+          }
+          S.timePref.timeByDay[day] = cur;
+          flatten();
+          render();
+        }
+      }, t));
+    });
+    chat.appendChild(row);
+    if (sel.length === 0) { allComplete = false; break; } // wait for this day before showing the next
+  }
+  if (!allComplete) return;
+
+  // Summary + done
+  const summary = orderedDays.map(d => `${d}: ${S.timePref.timeByDay[d].join('/')}`).join(' · ');
+  chat.appendChild(bMsg(`已记录 ✅ ${summary}`));
+  chat.appendChild(el('button',{class:'btn',style:'max-width:180px;margin:8px auto;display:block;',onclick:()=>{S.obStep='done';render();}},'完成注册 🎉'));
+}
+async function renderOBDone(root) {
+  await saveProfile();
+  const pg=el('div',{class:'ob-page',style:'overflow-y:auto;'});
+  const sm=el('div',{class:'',style:'padding:28px 24px;'});
+  sm.appendChild(el('div',{style:'text-align:center;margin-bottom:28px;'},[el('div',{html:'🎉',style:'font-size:52px;margin-bottom:10px;'}),el('h2',{html:`完成，${S.nickname}！`,style:'font-size:22px;font-weight:800;color:#1a1a2e;margin-bottom:6px;'}),el('p',{html:'档案已保存到匹配池。<br>现在去 AI 页面，告诉我你想找谁。',style:'font-size:14px;color:#888;line-height:1.7;'})]));
+  const list=el('div',{style:'display:flex;flex-direction:column;gap:10px;margin-bottom:28px;'});
+  S.selectedSports.forEach(key=>{
+    const sp=SPORTS.find(s=>s.key===key),pr=S.sportProg[key]||{};
+    const desc=(pr.answers||[]).map(a=>a.a).join(' · ')||'已采集';
+    list.appendChild(el('div',{style:'background:#f8f9fc;border-radius:14px;padding:14px 16px;display:flex;align-items:center;gap:14px;'},[el('div',{html:sp.e,style:'font-size:26px;'}),el('div',{},[el('div',{html:sp.n,style:'font-size:15px;font-weight:700;color:#1a1a2e;'}),el('div',{html:desc,style:'font-size:12px;color:#888;margin-top:2px;'})])]));
+  });
+  sm.appendChild(list);
+  sm.appendChild(el('button',{class:'btn',onclick:()=>{S.screen='main';S.tab='ai';S.meSportTab=S.selectedSports[0]||null;render();}},'去探索同频的朋友 →'));
+  pg.appendChild(sm); root.appendChild(pg);
+}
+
+// ============================================================
+// ME PAGE
+// ============================================================
+function renderMe(root) {
+  const hasSports=S.selectedSports.length>0;
+  if(hasSports&&!S.meSportTab) S.meSportTab=S.selectedSports[0];
+  const activeSport=hasSports?SPORTS.find(s=>s.key===S.meSportTab):null;
+  const activeProg=hasSports?(S.sportProg[S.meSportTab]||{}):null;
+  const stats=hasSports?(SPORT_STATS[S.meSportTab]||{days:0,hours:0,goals:0}):{days:0,hours:0,goals:0};
+  const levelAns=(activeProg?.answers||[]).find(a=>/水平|段位|NTRP|配速|时速|难度/.test(a.q));
+
+  const pg=el('div',{class:'me-page slide-up'});
+  pg.appendChild(el('div',{class:'me-header'},[
+    el('div',{},[el('h1',{html:'Me'}),el('div',{style:'font-size:12px;color:#aaa;margin-top:3px;',html:hasSports?`streak: ${stats.days} days · level: ${levelAns?.a||'intermediate'}`:'完成注册后查看'})]  ),
+    el('button',{class:'me-edit-btn',onclick:()=>{if(confirm('重新填写档案？')){{S.screen='onboarding';S.obStep='sport-select';S.selectedSports=[];S.sportProg={};S.timePref={days:[],times:[]};render();}}}},'编辑档案'),
+  ]));
+  pg.appendChild(el('div',{class:'me-user-row'},[
+    el('div',{class:'me-ava',html:(S.nickname||'M')[0].toUpperCase()}),
+    el('div',{},[
+      el('div',{class:'me-name',html:S.nickname||'用户'}),
+      el('div',{class:'me-role',html:'运动爱好者'}),
+      el('div',{class:'me-room-tag',html:`👥 ${S.poolCount>0?S.poolCount+'人在活动中':'活动池'}`,onclick:()=>toast(FIREBASE_ENABLED?'已连接云端，数据实时同步':'演示模式，仅本设备')}),
+    ]),
+  ]));
+
+  if (hasSports) {
+    // Sport tabs
+    const tabRow=el('div',{class:'sport-tabs'});
+    S.selectedSports.forEach(key=>{const sp=SPORTS.find(s=>s.key===key);tabRow.appendChild(el('div',{class:'sport-tab'+(key===S.meSportTab?' active':''),onclick:()=>{S.meSportTab=key;render();}},sp.n));});
+    pg.appendChild(tabRow);
+
+    // Stats
+    pg.appendChild(el('div',{class:'stats-card'},[
+      el('div',{class:'stat-cell'},[el('div',{class:'stat-icon',html:'📅'}),buildSN(stats.days,'天'),el('div',{class:'stat-label',html:'运动天数'})]),
+      el('div',{class:'stat-cell'},[el('div',{class:'stat-icon',html:'📈'}),buildSN(stats.hours,'小时'),el('div',{class:'stat-label',html:'总时长'})]),
+      el('div',{class:'stat-cell'},[el('div',{class:'stat-icon',html:'🎯'}),buildSN(stats.goals,'次'),el('div',{class:'stat-label',html:'完成目标'})]),
+    ]));
+
+    // Prefs
+    const answers=(activeProg?.answers||[]);
+    if(answers.length>0){
+      const sp=el('div',{class:'sport-prefs'});
+      sp.appendChild(el('div',{class:'prefs-title'},[el('span',{html:activeSport.e}),el('span',{html:activeSport.n+' · 我的偏好'})]));
+      const grid=el('div',{class:'prefs-grid'});
+      const qs=SPORT_QS[S.meSportTab]||[];
+      answers.forEach((ans,i)=>{grid.appendChild(el('div',{class:'pref-card'},[el('div',{class:'pref-label',html:qs[i]?qs[i].q:''}),el('div',{class:'pref-val',html:ans.a})]));});
+      sp.appendChild(grid);
+      sp.appendChild(el('div',{class:'redline-card',html:`🛡️ ${SPORT_REDLINES[S.meSportTab]}`}));
+      pg.appendChild(sp);
+    }
+  } else {
+    pg.appendChild(el('div',{style:'padding:40px 24px;text-align:center;color:#aaa;'},[el('div',{html:'🏃',style:'font-size:48px;margin-bottom:12px;'}),el('div',{html:'还没有运动档案',style:'font-size:16px;font-weight:700;color:#1a1a2e;margin-bottom:6px;'}),el('button',{class:'btn',style:'max-width:200px;margin:16px auto 0;display:block;',onclick:()=>{S.screen='onboarding';S.obStep='sport-select';render();}},'开始注册')]));
+  }
+
+  // AI quick actions
+  pg.appendChild(el('div',{class:'me-section'},[
+    el('div',{class:'me-section-title'},[el('span',{html:'✦'}),el('span',{html:'分身快捷意图'})]),
+    el('div',{class:'quick-btns'},[
+      el('button',{class:'quick-btn',onclick:()=>{S.tab='ai';S.aiMsgs.push({type:'user',c:'帮我找人约局'});render();}},'找人约局'),
+      el('button',{class:'quick-btn',onclick:()=>{S.tab='ai';S.aiMsgs.push({type:'user',c:'帮我筛选水平相近的人'});render();}},'帮我筛人'),
+      el('button',{class:'quick-btn',onclick:()=>{S.tab='chats';render();}},'查看聊天'),
+    ]),
+  ]));
+  pg.appendChild(el('div',{class:'me-rows'},[
+    buildMR('🔄','重置活动池（测试）',async ()=>{
+      if(!confirm('清空活动池里的同学数据并重新加载 classmates-pool.json？')) return;
+      localStorage.removeItem('mp_pool_users');
+      localStorage.removeItem('mp_classmates_loaded');
+      localStorage.removeItem('mp_chats_'+S.uid);
+      S.a2aChats=[]; S.autoFindStarted=false;
+      await seedClassmatesPool();
+      S.poolCount = await getPoolCount();
+      toast(`已重置，活动池现有 ${S.poolCount} 人`);
+      render();
+    }),
+  ]));
+  pg.appendChild(el('div',{style:'height:28px;'}));
+  root.appendChild(pg);
+}
+function buildSN(num,unit){const w=el('div',{class:'stat-num'});w.appendChild(document.createTextNode(String(num)));w.appendChild(el('span',{class:'stat-unit',html:unit}));return w;}
+function buildMR(icon,text,fn){return el('div',{class:'me-row',onclick:fn},[el('span',{class:'me-row-icon',html:icon}),el('span',{class:'me-row-text',html:text}),el('span',{class:'me-row-arrow',html:'›'})]);}
+
+// ============================================================
+// AI PAGE — the brain
+// ============================================================
+function renderAI(root) {
+  const me = buildProfileObj();
+  const pg=el('div',{class:'ai-page',style:'height:100%;'});
+
+  // header
+  const hdr=el('div',{class:'ai-header'});
+  hdr.appendChild(el('h1',{html:'AI'}));
+  const hRow=el('div',{class:'ai-header-row'});
+  hRow.appendChild(el('div',{class:'ai-status'},[el('div',{class:'ai-status-dot'}),el('span',{html:'分身在线'})]));
+  hRow.appendChild(el('div',{class:'ai-pool-tag',html:`👥 ${S.poolCount>1?S.poolCount+'人在活动中':'活动池'}`}));
+  hdr.appendChild(hRow); pg.appendChild(hdr);
+
+  // chat
+  const chat=el('div',{class:'ai-chat',id:'aiChat'});
+  S.aiMsgs.forEach(m=>chat.appendChild(buildAIMsg(m,me)));
+  pg.appendChild(chat);
+
+  // input
+  const bar=el('div',{class:'ai-input-bar'});
+  const inp=el('input',{class:'ai-input',placeholder:'告诉我你想约什么运动、在哪里...',type:'text'});
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&inp.value.trim())sendAI(inp,me);});
+  bar.appendChild(inp);
+  bar.appendChild(el('button',{class:'ai-send',html:'▲',onclick:()=>sendAI(inp,me)}));
+  pg.appendChild(bar); root.appendChild(pg);
+  requestAnimationFrame(()=>{ const c=$('#aiChat');if(c)c.scrollTop=c.scrollHeight; });
+
+}
+
+function buildAIMsg(m, me) {
+  if(m.type==='sys') return el('div',{class:'ai-sys'},[el('div',{class:'ai-sys-tag',html:m.c})]);
+  if(m.type==='ai'){
+    const w=el('div',{class:'ai-msg-ai'});
+    w.appendChild(el('div',{class:'ai-ava',html:'✦'}));
+    const col=el('div',{style:'display:flex;flex-direction:column;gap:8px;max-width:78%;'});
+    col.appendChild(el('div',{class:'ai-bubble-ai',style:'max-width:100%;',html:m.c.replace(/\n/g,'<br>')}));
+    if (m.button) {
+      col.appendChild(el('button',{
+        class:'btn',
+        style:'padding:10px 18px;font-size:13px;border-radius:14px;align-self:flex-start;max-width:160px;',
+        onclick:()=>{ S.tab='chats'; S.curChat=null; render(); }
+      }, m.button));
+    }
+    w.appendChild(col);
+    return w;
+  }
+  if(m.type==='user') return el('div',{class:'ai-msg-user'},[el('div',{class:'ai-bubble-user',html:m.c})]);
+  if(m.type==='thinking'){const w=el('div',{class:'ai-msg-ai'});w.appendChild(el('div',{class:'ai-ava',html:'✦'}));const s=el('div',{class:'ai-searching'});[1,2,3].forEach(()=>s.appendChild(el('span')));w.appendChild(s);return w;}
+  if(m.type==='cond') return buildCondCard(m, me);
+  if(m.type==='result') return buildResultCard(m);
+  return el('div');
+}
+
+function buildCondCard(m, me) {
+  const card=el('div',{class:'cond-card slide-up'});
+  const sp=SPORTS.find(s=>s.key===m.sportKey)||{e:'🎾',n:m.sportKey};
+  card.appendChild(el('div',{class:'cond-header',html:`${sp.e} ${sp.n} · 匹配条件`}));
+  const rows=el('div',{class:'cond-rows'});
+  m.conditions.forEach(c=>{rows.appendChild(el('div',{class:'cond-row'},[el('span',{class:'cond-key',html:c.k}),el('span',{class:'cond-val',html:c.v})]));});
+  card.appendChild(rows);
+  const acts=el('div',{class:'cond-actions'});
+  acts.appendChild(el('button',{class:'cond-btn-no',onclick:()=>{ S.aiMsgs.push({type:'user',c:'调整一下条件'},{type:'ai',c:'好的，你想修改哪个条件？直接告诉我。'});render(); }},'调整'));
+  acts.appendChild(el('button',{class:'cond-btn-yes',onclick:()=>confirmAndSearch(m,me)},'确认，开始搜索 ✦'));
+  card.appendChild(acts);
+  return el('div',{class:'ai-msg-ai'},[el('div',{class:'ai-ava',html:'✦'}),card]);
+}
+
+async function confirmAndSearch(m, me) {
+  S.aiMsgs.push({type:'user',c:'确认，开始搜索'});
+  S.aiMsgs.push({type:'thinking'});
+  render();
+  const users = await getPoolUsers();
+  // Score and filter
+  const candidates = users
+    .map(u=>{ const {score,shared}=calcScore(me,u); return{user:u,score,shared}; })
+    .filter(c=>c.score>0 && c.shared.includes(m.sportKey))
+    .sort((a,b)=>b.score-a.score)
+    .slice(0,4);
+  // Remove thinking
+  S.aiMsgs = S.aiMsgs.filter(x=>x.type!=='thinking');
+  if(candidates.length===0){
+    S.aiMsgs.push({type:'ai',c:`活动池里暂时没有也打 ${SPORTS.find(s=>s.key===m.sportKey)?.n||m.sportKey} 的人。\n\n等更多同学填完档案后重新试试吧！`});
+  } else {
+    S.aiMsgs.push({type:'ai',c:`好的！我扫了活动池里 ${users.length} 个人的档案，找到 ${candidates.length} 个符合条件的人，匹配分从高到低排列 👇`});
+    candidates.forEach(c=>{S.aiMsgs.push({type:'result',user:c.user,score:c.score,shared:c.shared,sportKey:m.sportKey});});
+    S.aiMsgs.push({type:'ai',c:'点击「发送邀约」，我会替你以分身身份和对方的档案聊，确认后在「Chats」里查看对话历史。'});
+  }
+  render();
+}
+
+function buildResultCard(m) {
+  const {user,score,shared,sportKey}=m;
+  const initial=(user.nickname||'?')[0].toUpperCase();
+  const gradients=['linear-gradient(135deg,#6c63ff,#a78bfa)','linear-gradient(135deg,#3B5BF6,#818cf8)','linear-gradient(135deg,#0ea5e9,#6366f1)','linear-gradient(135deg,#10b981,#3B5BF6)'];
+  const gIdx=(user.uid||'').charCodeAt(2)%gradients.length||0;
+  const card=el('div',{class:'ai-result-card slide-up'});
+  const nr=el('div',{class:'arc-name-row'});
+  nr.appendChild(el('div',{class:'arc-ava',style:`background:${gradients[gIdx]}`,html:initial}));
+  nr.appendChild(el('div',{class:'arc-name',html:user.nickname}));
+  // (score display removed — no numeric scores shown anywhere)
+  card.appendChild(nr);
+  const tags=el('div',{class:'arc-tags'});
+  (user.sports||[]).forEach(s=>{const sp=SPORTS.find(x=>x.key===s.key);tags.appendChild(el('div',{class:'arc-tag'+(shared.includes(s.key)?' match':''),html:(sp?.e||'')+' '+(sp?.n||s.key)}));});
+  const tp=user.timePref;
+  if(tp?.days?.length) tags.appendChild(el('div',{class:'arc-tag',html:'⏰ '+tp.days.join('/')+' '+tp.times?.join('/')}));
+  card.appendChild(tags);
+  const acts=el('div',{class:'arc-actions'});
+  acts.appendChild(el('button',{class:'arc-btn-pass',onclick:()=>{toast(`已跳过 ${user.nickname}`);}},'跳过'));
+  acts.appendChild(el('button',{class:'arc-btn-invite',onclick:()=>sendInvite(user,score,shared,sportKey)},'发送邀约 ✦'));
+  card.appendChild(acts);
+  return card;
+}
+
+async function sendInvite(user, score, shared, sportKey) {
+  const sp=SPORTS.find(s=>s.key===sportKey)||{key:sportKey,e:'🎾',n:sportKey};
+  // Build A2A chat
+  const chatId='c_'+Date.now().toString(36);
+  const myProfile=buildProfileObj();
+  const mySportData=myProfile.sports.find(s=>s.key===sportKey)||{answers:[]};
+  const theirSportData=(user.sports||[]).find(s=>s.key===sportKey)||{answers:[]};
+
+  const a2aMessages = buildA2AConversation(myProfile.nickname, user.nickname, sp, mySportData, theirSportData, myProfile, user);
+
+  const chat = {
+    id: chatId, uid: user.uid, name: user.nickname,
+    sport: sp.e+' '+sp.n, score, shared,
+    status: 'confirmed', unread: 1,
+    timeAgo: '刚刚',
+    preview: a2aMessages[a2aMessages.length-1]?.c||'分身已发出邀约',
+    messages: a2aMessages,
+  };
+  await saveA2AChat(chat);
+  S.aiMsgs.push({type:'ai',c:`✅ 已向 ${user.nickname} 发出邀约！\n\n我的分身已发出了第一条消息，去「Chats」查看 A2A 对话详情。`});
+  S.tab='chats'; // hint
+  render();
+  toast('邀约已发送！去 Chats 查看');
+}
+
+// ============================================================
+// A2A CONVERSATION ENGINE — driven by real data comparison
+// ============================================================
+// Rules:
+//  - Time is NOT a matching axis (time is treated as flexible).
+//  - Each round compares ONE technical dimension from TECH_DIMS.
+//  - Comparison verdict drives what each agent says.
+//  - Critical conflict → early exit + red-line system message.
+//  - Final verdict computed from real per-dim counts.
+// ============================================================
+function fmt(tmpl, my, their, gap) {
+  return (tmpl||'').replace(/\{my\}/g, my||'-').replace(/\{their\}/g, their||'-').replace(/\{gap\}/g, gap||'');
+}
+
+// Extra rounds for SAME sport — uses SPORT_QS answers NOT covered by TECH_DIMS.
+// These are "soft" technical dimensions (e.g. distance for running when only pace
+// is critical, venue text, secondary preferences) — surfaced as natural follow-up.
+function buildExtraSameSportRounds(key, myAnswers, theirAnswers, maxRounds = 2) {
+  const covered = new Set((TECH_DIMS[key] || []).map(d => d.qIdx));
+  const qs = SPORT_QS[key] || [];
+  const rounds = [];
+  for (let i = 0; i < qs.length && rounds.length < maxRounds; i++) {
+    if (covered.has(i)) continue;
+    const q = qs[i];
+    const myA = myAnswers[i]?.a, theirA = theirAnswers[i]?.a;
+    if (!myA || !theirA) continue;
+    const labelHint = q.q.replace(/？$/, '');
+
+    if (myA === theirA) {
+      rounds.push({
+        mine: `顺便：${labelHint} 我是「${myA}」`,
+        their: `「${theirA}」，居然一样 ✅`,
+      });
+      continue;
+    }
+
+    // Venue-style text: token overlap detection
+    if (q.type === 'text') {
+      const tokenize = s => s.split(/[\s，,、/·]+/).filter(t => t.length >= 2);
+      const ta = tokenize(myA), tb = tokenize(theirA);
+      const overlap = ta.some(t => tb.some(x => x.includes(t) || t.includes(x))) || myA.includes(theirA) || theirA.includes(myA);
+      if (overlap) {
+        rounds.push({
+          mine: `${labelHint} 我在「${myA}」`,
+          their: `我在「${theirA}」，位置也算重叠 ✅`,
+        });
+      } else {
+        rounds.push({
+          mine: `${labelHint} 我常去「${myA}」，你呢？`,
+          their: `我「${theirA}」，地点稍有差距，可以协调一下场地。`,
+        });
+      }
+      continue;
+    }
+
+    // Categorical secondary preference: mention it without judging
+    const flexSet = new Set(['都可以','都行','看情况','随意','偶尔','有时候']);
+    const myFlex = flexSet.has(myA), theirFlex = flexSet.has(theirA);
+    if (myFlex || theirFlex) {
+      rounds.push({
+        mine: `还有 ${labelHint}：我「${myA}」`,
+        their: `我「${theirA}」，比较灵活 👍`,
+      });
+    } else {
+      rounds.push({
+        mine: `${labelHint} 我「${myA}」`,
+        their: `我「${theirA}」，偏好不同但不是硬条件，可以试试看。`,
+      });
+    }
+  }
+  return rounds;
+}
+
+// Cross-sport common ground: shared other sports become extra "同频" signals
+function buildCrossSportRounds(myProfile, theirProfile, currentSportKey, maxRounds = 2) {
+  const mySports = (myProfile?.sports || []).map(s => s.key);
+  const theirSports = new Set((theirProfile?.sports || []).map(s => s.key));
+  const shared = mySports.filter(k => k !== currentSportKey && theirSports.has(k));
+  const rounds = [];
+  for (const k of shared.slice(0, maxRounds)) {
+    const sp = SPORTS.find(s => s.key === k);
+    if (!sp) continue;
+    const myAns = (myProfile.sports.find(s => s.key === k)?.answers) || [];
+    const theirAns = (theirProfile.sports.find(s => s.key === k)?.answers) || [];
+    // Find the most informative critical tech dim with data on both sides
+    const dims = TECH_DIMS[k] || [];
+    const dim = dims.find(d => d.critical && myAns[d.qIdx]?.a && theirAns[d.qIdx]?.a)
+             || dims.find(d => myAns[d.qIdx]?.a && theirAns[d.qIdx]?.a);
+
+    if (!dim) {
+      rounds.push({
+        mine: `话说，看你档案里也有 ${sp.e}${sp.n} —— 我也玩这个，同频范围更大了。`,
+        their: `是呀！下次可以一起开 ${sp.n} 的局 👍`,
+      });
+      continue;
+    }
+    const cmp = compareDimension(dim, myAns[dim.qIdx].a, theirAns[dim.qIdx].a);
+    if (cmp.verdict === 'match' || cmp.verdict === 'flex') {
+      rounds.push({
+        mine: `话说你档案里也有 ${sp.e}${sp.n} —— ${dim.label} 我「${cmp.myA}」`,
+        their: `巧了，我「${cmp.theirA}」，${sp.n} 这块也算同频 ✅`,
+      });
+    } else if (cmp.verdict === 'gap') {
+      rounds.push({
+        mine: `顺便看到你也玩 ${sp.e}${sp.n}，${dim.label} 我「${cmp.myA}」`,
+        their: `我「${cmp.theirA}」，差一档能合，回头也可以约 👍`,
+      });
+    } else {
+      rounds.push({
+        mine: `话说你也玩 ${sp.e}${sp.n}，不过 ${dim.label} 我「${cmp.myA}」`,
+        their: `我「${cmp.theirA}」，这块差距有点大，${sp.n} 不一定合得来，但本次约局没影响。`,
+      });
+    }
+  }
+  return rounds;
+}
+
+function buildA2AConversation(myName, theirName, sp, mySport, theirSport, myProfile, theirProfile) {
+  const key = sp.key || (mySport?.key);
+  const msgs = [];
+  msgs.push({type:'sys', c:'A2A 对话 · AI 分身代发'});
+
+  const myAnswers = mySport?.answers || [];
+  const theirAnswers = theirSport?.answers || [];
+  const dims = TECH_DIMS[key] || [];
+
+  // No technical dimensions defined → cannot evaluate, mark unknown
+  if (dims.length === 0) {
+    msgs.push({type:'mine', c:`Hi！我是 ${myName} 的分身，找 ${sp.n} 同频朋友 ✦\n你档案里也有 ${sp.n}，来聊聊？`});
+    msgs.push({type:'their', c:`你好，我是 ${theirName} 的分身。可以呀，我们交换一下细节。`});
+    msgs.push({type:'sys', c:'⚠️ 该运动暂未配置技术维度，无法精确匹配'});
+    return msgs;
+  }
+
+  // Run real comparison engine
+  const {results} = compareProfiles(key, myAnswers, theirAnswers);
+
+  // Opener — my agent introduces context grounded in profile
+  msgs.push({type:'mine', c:`Hi！我是 ${myName} 的运动分身 ✦\n\n在找 ${sp.n} 的同频朋友，想从技术维度对一下：${dims.map(d=>d.label).join('、')}。\n\n一项一项过一下？`});
+  msgs.push({type:'their', c:`好，我是 ${theirName} 的分身。逐项核对，分歧的也聊聊看怎么调。`});
+
+  // Walk EVERY dim — no early exit; compute weighted score in parallel.
+  let matches = 0, gaps = 0, flexes = 0, conflicts = 0, skipped = 0;
+  let earned = 0, possible = 0;
+
+  for (const r of results) {
+    const d = r.dim;
+    if (r.verdict === 'skip') { skipped++; continue; }
+    const w = d.weight || 1;
+    possible += w;
+    const pct = VERDICT_PCT[r.verdict] ?? 0;
+    earned += w * pct;
+
+    // My agent asks, declaring own value
+    msgs.push({type:'mine', c:`【${d.label}】` + fmt(d.ask, r.myA, r.theirA, r.gap)});
+
+    // Their agent responds based on verdict — but conflicts no longer cut off.
+    if (r.verdict === 'match') {
+      msgs.push({type:'their', c:fmt(d.okMsg, r.myA, r.theirA, r.gap)});
+      matches++;
+    } else if (r.verdict === 'flex') {
+      msgs.push({type:'their', c:fmt(d.flexMsg || d.okMsg, r.myA, r.theirA, r.gap)});
+      flexes++;
+    } else if (r.verdict === 'gap') {
+      msgs.push({type:'their', c:fmt(d.gapMsg || d.okMsg, r.myA, r.theirA, r.gap)});
+      gaps++;
+    } else if (r.verdict === 'conflict') {
+      msgs.push({type:'their', c:fmt(d.conflictMsg, r.myA, r.theirA, r.gap) + '（这条算分扣点，但还能继续看其它项）'});
+      conflicts++;
+    }
+  }
+
+  // Final score out of 10
+  const score10 = possible > 0 ? Math.round((earned / possible) * 100) / 10 : 0;
+  // Stamp in the wrap-up phase via a closure-style return — caller will read it from the chat's matchPercent field.
+  msgs.__score10 = score10;
+
+  // ===== Extra soft signals from the profile, when not red-lined =====
+  // Cap total extra rounds so the conversation stays focused (<=10 rounds total).
+  const usedTurns = matches + gaps + flexes; // already produced exchanges
+  const remainingBudget = Math.max(0, 6 - usedTurns); // headroom for extras
+  let extraBudget = Math.min(2, remainingBudget);
+  let crossBudget = Math.min(2, remainingBudget - extraBudget);
+
+  // Additional same-sport dimensions not covered by TECH_DIMS
+  const extraSame = buildExtraSameSportRounds(key, myAnswers, theirAnswers, extraBudget);
+  let softMatches = 0, softNotes = 0;
+  for (const r of extraSame) {
+    msgs.push({type:'mine', c:r.mine});
+    msgs.push({type:'their', c:r.their});
+    if (/✅|一样|重叠/.test(r.their)) softMatches++; else softNotes++;
+  }
+
+  // Cross-sport common ground (other shared sports — extra 同频 signals)
+  const cross = buildCrossSportRounds(myProfile, theirProfile, key, crossBudget);
+  for (const r of cross) {
+    msgs.push({type:'mine', c:r.mine});
+    msgs.push({type:'their', c:r.their});
+    if (/✅|同频|一致|巧了/.test(r.their)) softMatches++; else softNotes++;
+  }
+
+  // Compose wrap-up driven by real counts
+  const totalCovered = matches + gaps + flexes + conflicts;
+  const isTechMatch = conflicts === 0 && (matches + flexes) >= Math.max(1, Math.ceil(totalCovered * 0.5));
+
+  const softSummary = softMatches ? `；另外还有 ${softMatches} 个非硬条件的同频点` : '';
+  // score10 was computed earlier in the dim-walking loop and saved on msgs.__score10
+  const scoreLabel = `综合 ${msgs.__score10 || 0}/10 分`;
+
+  if (score10 >= 7) {
+    msgs.push({type:'mine', c:`${scoreLabel}：${matches} 项一致${flexes?`、${flexes} 项灵活兼容`:''}${gaps?`、${gaps} 项小差距`:''}${conflicts?`、${conflicts} 项有分歧`:''}${softSummary}。整体很合拍！`});
+    msgs.push({type:'their', c:`同感 ✅ 玩起来肯定有的聊，你们自己继续吧。`});
+    msgs.push({type:'sys', c:`✅ 技术同频 · ${scoreLabel}`});
+  } else if (score10 >= 5) {
+    msgs.push({type:'mine', c:`${scoreLabel}：${matches} 项一致${flexes?`、${flexes} 项兼容`:''}${gaps?`、${gaps} 项小差距`:''}${conflicts?`、${conflicts} 项分歧`:''}${softSummary}。能玩起来，分歧的部分实际玩时商量一下。`});
+    msgs.push({type:'their', c:`同意，没有完全一样的，但可以一起玩 ✅`});
+    msgs.push({type:'sys', c:`✅ 基本同频 · ${scoreLabel}`});
+  } else {
+    msgs.push({type:'mine', c:`${scoreLabel}：${matches} 项一致${flexes?`、${flexes} 项兼容`:''}${gaps?`、${gaps} 项差距`:''}${conflicts?`、${conflicts} 项分歧`:''}。差距偏大，玩起来节奏可能不太顺。`});
+    msgs.push({type:'their', c:'同步保留，下次条件更近再聊。'});
+    msgs.push({type:'sys', c:`⚠️ 暂不同频 · ${scoreLabel}`});
+  }
+
+  return msgs;
+}
+
+// Auto-initiate A2A chats for all matching users across all sports
+// MATCH_THRESHOLD: chats with score >= threshold appear in main list (with
+// green intensity reflecting fit); below threshold are minimized as "暂不同频".
+const MATCH_THRESHOLD = 30;
+
+// Scan for ONE specific sport. Two-stage matching:
+//   Stage 1 (keyword filter): pool users who have this sport in their profile.
+//   Stage 2 (technical match): for each, run buildA2AConversation to compare profiles.
+// Anyone without the sport is filtered out — no agent chat is generated for them.
+async function autoFindForSport(me, sportKey, focusHint) {
+  // Concurrency guard — if a scan is already running, ignore this trigger.
+  if (S.scanInProgress) return;
+  S.scanInProgress = true;
+
+  const users = await getPoolUsers();
+  const sp = SPORTS.find(s => s.key === sportKey) || {key:sportKey, e:'🎾', n:sportKey};
+
+  if (users.length === 0) {
+    S.scanProgress = null; S.scanCompleted = true; S.scanInProgress = false;
+    S.aiMsgs.push({type:'ai', c:'活动池里暂时没有其他人的档案。等大家都填完后再试。'});
+    render(); return;
+  }
+
+  // STAGE 1: keyword filter by sport key
+  const filtered = users.filter(u => (u.sports||[]).some(s => s.key === sportKey));
+  if (filtered.length === 0) {
+    S.scanProgress = null; S.scanCompleted = true; S.scanInProgress = false;
+    S.aiMsgs.push({type:'ai', c:`活动池里暂时没有玩 ${sp.e} ${sp.n} 的同学。换个运动试试？`});
+    render(); return;
+  }
+
+  // STAGE 2: build candidates with score for technical match
+  const candidates = filtered.map(user => {
+    const {score, shared} = calcScore(me, user);
+    return {user, score, shared, sportKey};
+  });
+
+  if (candidates.length === 0) {
+    S.scanProgress = null; S.scanCompleted = true; S.scanInProgress = false;
+    render(); return;
+  }
+
+  // Initialize Dynamic Island progress
+  S.scanProgress = {current: 0, total: candidates.length, name: '', done: false, sport: sp};
+  render();
+
+  // Pace the scan so the Dynamic Island is visible for at least 3 seconds.
+  // Small candidate sets get slowed down so the user perceives the work.
+  const MIN_SCAN_MS = 5000; // user-visible scan phase
+  const perStepMs = Math.max(150, Math.floor(MIN_SCAN_MS / Math.max(1, candidates.length)));
+
+  let matched = 0;
+  try {
+  for (let i = 0; i < candidates.length; i++) {
+    const {user, score, shared, sportKey} = candidates[i];
+    S.scanProgress = {current: i + 1, total: candidates.length, name: user.nickname, done: false, sport: sp};
+    // Repaint every step so the island bar moves smoothly
+    render();
+    // Pace the scan — fill at least MIN_SCAN_MS regardless of candidate count
+    await new Promise(r => setTimeout(r, perStepMs));
+
+    // Note: `sp` is the outer-scope sport already resolved before the loop.
+    const myProfile = buildProfileObj();
+    const mySportData = myProfile.sports.find(s=>s.key===sportKey)||{key:sportKey,answers:[]};
+    const theirSportData = (user.sports||[]).find(s=>s.key===sportKey)||{key:sportKey,answers:[]};
+    const a2aMsgs = buildA2AConversation(myProfile.nickname, user.nickname, sp, mySportData, theirSportData, myProfile, user);
+
+    // Weighted-score decision (out of 10). >=5 → main list; <5 → minimized.
+    const score10 = a2aMsgs.__score10 || 0;
+    const score100 = Math.round(score10 * 10);  // 0-100 scale for color intensity
+    const aboveThreshold = score10 >= 5;
+
+    const lastText = a2aMsgs.filter(m=>m.type==='mine'||m.type==='their').slice(-1)[0]?.c || '';
+    const chat = {
+      id:'c_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
+      uid:user.uid, name:user.nickname,
+      sport:sp.e+' '+sp.n, score: score100, matchPercent: score10, shared,
+      status: aboveThreshold ? 'confirmed' : 'no-match',
+      unread: aboveThreshold ? 1 : 0,
+      timeAgo:'刚刚',
+      preview: lastText.slice(0,40)+(lastText.length>40?'…':''),
+      messages: a2aMsgs,
+    };
+    await saveA2AChat(chat);
+    if (aboveThreshold) matched++;
+  }
+  } catch (e) {
+    // Loop error — log, but still go through cleanup so the island doesn't get stuck.
+    console.error('[autoFindForSport] scan loop error:', e);
+  }
+
+  // Hold the "done" pill on the island for ~2 seconds BEFORE pushing the
+  // AI summary into chat — the island IS the immediate confirmation; the
+  // chat bubble is the deferred next step.
+  S.scanProgress = {current: candidates.length, total: candidates.length, done: true, matched, sport: sp};
+  S.scanCompleted = true;
+  render();
+  await new Promise(r => setTimeout(r, 2500));
+
+  // Always offer "去看看" button so the user can browse what the agents discussed —
+  // even when no one cleared 5/10, the minimized chats reveal why each候选 didn't fit.
+  if (matched === 0) {
+    S.aiMsgs.push({type:'ai', c:`分身和每位 ${sp.e} ${sp.n} 同学都聊过了，目前还没找到 5 分以上的同频朋友。可以去看看分身的对话记录，了解大家差在哪。`, button:'去看看'});
+  } else {
+    S.aiMsgs.push({type:'ai', c:`你的 ${sp.e} ${sp.n} 同频朋友的分身已经聊完了。`, button:'去看看'});
+  }
+  // Fade out the island; stay on AI page so the user reads the bubble and decides to tap.
+  S.scanProgress = null;
+  S.scanInProgress = false;
+  render();
+}
+
+// AI message processing — already async
+async function sendAI(inp, me) {
+  const t=inp.value.trim(); if(!t)return; inp.value='';
+  // Defensive: any stale island state from a previous scan is cleared on new input.
+  if (S.scanProgress && !S.scanInProgress) { S.scanProgress = null; }
+  S.aiMsgs.push({type:'user',c:t});
+  render();
+
+  // STAGE 1: detect sport name → analyze profile + ask for focus
+  const sportMatch = SPORTS.find(sp=>t.includes(sp.n)||t.includes(sp.key));
+  if (sportMatch) {
+    const mySport = (me.sports||[]).find(s => s.key === sportMatch.key);
+    if (!mySport) {
+      S.aiMsgs.push({type:'ai', c:`你的档案里还没有 ${sportMatch.e} ${sportMatch.n}，先去 Me 页面补充一下，我才能帮你找到对的人。`});
+      S.aiPendingSearch = null;
+      render(); return;
+    }
+    S.aiPendingSearch = {sportKey: sportMatch.key};
+    const desc = describeIdealProfile(me, sportMatch.key);
+    S.aiMsgs.push({type:'ai', c:`好！我读了下你的档案，你想找的 ${sportMatch.e} ${sportMatch.n} 同频画像应该是：\n\n${desc}\n\n你有特别希望我重点沟通的点吗？比如水平、场地、强度...直接说就行；或者说「开始」我立刻出发 ✦`});
+    render(); return;
+  }
+
+  // STAGE 2: if we asked for focus, treat this reply as the focus and kick off the scan
+  if (S.aiPendingSearch) {
+    const sportKey = S.aiPendingSearch.sportKey;
+    const sp = SPORTS.find(s => s.key === sportKey) || {key:sportKey, e:'🎾', n:sportKey};
+    const skipFocus = /开始|跳过|不用|算了|找吧|出发|go/i.test(t);
+    if (skipFocus) {
+      S.aiMsgs.push({type:'ai', c:`好，我直接开始 —— 扫描所有玩 ${sp.e} ${sp.n} 的同学。进度看顶部小岛 ✦`});
+    } else {
+      S.aiMsgs.push({type:'ai', c:`OK，重点沟通「${t}」。我去和每个 ${sp.e} ${sp.n} 的同学的分身聊一聊。进度看顶部小岛 ✦`});
+    }
+    S.aiPendingSearch = null;
+    render();
+    await autoFindForSport(me, sportKey, skipFocus ? null : t);
+    // autoFindForSport handles its own done-pill → auto-jump to Chats transition.
+    return;
+  }
+
+  if (/多少人|几个人|活动池/.test(t)) {
+    getPoolCount().then(cnt=>{
+      S.aiMsgs.push({type:'ai',c:`活动池里现在有 ${cnt} 个人填了档案。`});
+      render();
+    });
+    return;
+  }
+
+  if (me.sports && me.sports.length > 0) {
+    const list = me.sports.map(s => { const sp = SPORTS.find(x=>x.key===s.key); return sp ? sp.e + sp.n : s.key; }).join(' · ');
+    S.aiMsgs.push({type:'ai', c:`告诉我具体想找什么运动的朋友，比如「想约网球」「找羽毛球」。\n\n你登记过的：${list}`});
+  } else {
+    S.aiMsgs.push({type:'ai', c:'你还没填运动档案。先去 Me 页面登记你的运动和水平。'});
+  }
+  render();
+}
+
+// Build a human-readable description of the ideal同频 partner profile from the user's data.
+function describeIdealProfile(me, sportKey) {
+  const mySport = (me.sports||[]).find(s => s.key === sportKey);
+  if (!mySport) return '';
+  const qs = SPORT_QS[sportKey] || [];
+  const ans = mySport.answers || [];
+  const lines = [];
+  for (let i = 0; i < ans.length; i++) {
+    const a = ans[i]?.a;
+    if (!a) continue;
+    const q = qs[i];
+    if (!q) continue;
+    const label = q.q.replace(/？$/, '').replace(/^(一般在|偏好|有|需要|愿意|常去|主要|在哪|约局)/, '');
+    lines.push(`• ${q.q.replace(/？$/,'')}：${a}`);
+  }
+  if (me.timePref?.days?.length) {
+    const t = me.timePref.days.join('/') + (me.timePref.times?.length ? ' ' + me.timePref.times.join('/') : '');
+    lines.push(`• 时间偏好：${t}`);
+  }
+  return lines.join('\n');
+}
+
+function buildConditions(mySport, timePref, userText) {
+  const ans=mySport?.answers||[];
+  const qs=SPORT_QS[mySport?.key]||[];
+  const conds=[];
+  // Area
+  const area=ans.find(a=>/哪里|区域|路线/.test(a.q));
+  if(area) conds.push({k:'区域',v:area.a});
+  // Level
+  const level=ans.find(a=>/水平|段位|NTRP|配速|时速/.test(a.q));
+  if(level) conds.push({k:'水平',v:level.a});
+  // Style/type
+  const style=ans.find(a=>/单打|双打|人制|类型|泳姿|台型/.test(a.q));
+  if(style) conds.push({k:'方式',v:style.a});
+  // Time
+  if(timePref?.days?.length){
+    conds.push({k:'时间',v:(timePref.days||[]).join('/')+(timePref.times?.length?(' '+timePref.times.join('/')):'')});
+  }
+  // From user text
+  if(/这周|周末|今天|明天/.test(userText)) conds.push({k:'期望',v:userText.match(/(这周|周末|今天|明天|周[一二三四五六日])/)?.[0]||'近期'});
+  if(conds.length===0) conds.push({k:'运动',v:SPORTS.find(s=>s.key===mySport?.key)?.n||'未指定'});
+  return conds;
+}
+
+// ============================================================
+// CHATS PAGE — A2A history
+// ============================================================
+// Green intensity by match score — darker green = higher fit.
+// Wider visual gap between tiers so the contrast is obvious at a glance.
+function matchRingColor(score) {
+  if (score >= 70) return '#14532d'; // 森林深绿 (very high)
+  if (score >= 55) return '#16a34a'; // 饱和绿 (high)
+  if (score >= 45) return '#4ade80'; // 亮绿 (medium)
+  return '#bbf7d0';                   // 淡绿 (low)
+}
+
+function buildChatItem(chat, idx, gradients, opts={}) {
+  const initial=(chat.name||'?')[0];
+  const item=el('div',{class:'chat-item',onclick:()=>{chat.unread=0;S.curChat=chat.id;render();}});
+  // Avatar — no match color here (moved to right side)
+  const aw=el('div',{class:'ci-ava-wrap'});
+  aw.appendChild(el('div',{class:'ci-ava',style:`background:${gradients[idx%gradients.length]}`,html:initial}));
+  aw.appendChild(el('div',{class:'ci-dot ai'}));
+  item.appendChild(aw);
+  // Info column
+  const info=el('div',{class:'ci-info'});
+  info.appendChild(el('div',{class:'ci-row1'},[el('div',{class:'ci-name',html:chat.name}),el('div',{class:'ci-time',html:chat.timeAgo})]));
+  info.appendChild(el('div',{class:'ci-msg',html:chat.preview}));
+  info.appendChild(el('div',{class:'ci-badges'},[
+    el('div',{class:'ci-badge a2a',html:'✦ AI分身'}),
+    el('div',{class:'ci-badge',style:'background:#f4f6ff;color:#3B5BF6;',html:chat.sport}),
+  ]));
+  item.appendChild(info);
+  // Right-side match indicator — colored by score intensity
+  if (!opts.muted) {
+    const matchColor = matchRingColor(chat.score || 0);
+    if (chat.unread > 0) {
+      item.appendChild(el('div',{class:'ci-unread',style:`background:${matchColor};`,html:String(chat.unread)}));
+    } else {
+      item.appendChild(el('div',{class:'ci-match-dot',style:`background:${matchColor};`}));
+    }
+  } else {
+    // Minimized (暂不同频): grey, no color indicator
+    if (chat.unread > 0) item.appendChild(el('div',{class:'ci-unread',style:'background:#9ca3af;',html:String(chat.unread)}));
+  }
+  return item;
+}
+
+function renderChats(root) {
+  const pg=el('div',{class:'chats-page slide-up'});
+  const matched = S.a2aChats.filter(c=>c.status==='confirmed'||c.status==='pending')
+                            .sort((a,b)=>(b.score||0)-(a.score||0));
+  const unmatched = S.a2aChats.filter(c=>c.status==='no-match');
+  pg.appendChild(el('div',{class:'chats-header'},[el('h1',{html:'Chats'}),el('div',{class:'ch-sub',html:`AI 分身对话 · ${matched.length} 个同频`})]));
+
+  if(S.a2aChats.length===0){
+    pg.appendChild(el('div',{style:'padding:60px 30px;text-align:center;color:#aaa;'},[
+      el('div',{html:'💬',style:'font-size:48px;margin-bottom:12px;'}),
+      el('div',{html:'还没有对话记录',style:'font-size:16px;font-weight:700;color:#1a1a2e;margin-bottom:6px;'}),
+      el('div',{html:'去 AI 页面告诉分身你想约什么运动',style:'font-size:13px;'}),
+      el('button',{class:'btn',style:'max-width:200px;margin:16px auto 0;display:block;',onclick:()=>{S.tab='ai';render();}},'去 AI 页面'),
+    ]));
+    root.appendChild(pg); return;
+  }
+
+  const gradients=['linear-gradient(135deg,#6c63ff,#a78bfa)','linear-gradient(135deg,#3B5BF6,#818cf8)','linear-gradient(135deg,#0ea5e9,#6366f1)'];
+
+  // Matched chats — shown normally
+  const list=el('div',{class:'chat-list'});
+  matched.forEach((chat,idx)=>list.appendChild(buildChatItem(chat,idx,gradients)));
+  pg.appendChild(list);
+
+  // Unmatched — collapsed section at bottom
+  if(unmatched.length>0){
+    const isOpen = S.unmatchedOpen || false;
+    const section=el('div',{style:'margin-top:8px;'});
+    const toggle=el('div',{
+      style:'display:flex;align-items:center;gap:8px;padding:10px 20px;cursor:pointer;',
+      onclick:()=>{ S.unmatchedOpen=!S.unmatchedOpen; render(); }
+    },[
+      el('div',{style:'flex:1;height:1px;background:#f0f0f5;'}),
+      el('div',{style:'font-size:12px;color:#bbb;white-space:nowrap;display:flex;align-items:center;gap:5px;'},[
+        el('span',{html: isOpen ? '▴' : '▾'}),
+        el('span',{html:`${unmatched.length} 个暂不同频`}),
+      ]),
+      el('div',{style:'flex:1;height:1px;background:#f0f0f5;'}),
+    ]);
+    section.appendChild(toggle);
+    if(isOpen){
+      const uList=el('div',{class:'chat-list',style:'opacity:.55;'});
+      unmatched.forEach((chat,idx)=>uList.appendChild(buildChatItem(chat,idx,['linear-gradient(135deg,#d1d5db,#9ca3af)'],{muted:true})));
+      section.appendChild(uList);
+    }
+    pg.appendChild(section);
+  }
+
+  root.appendChild(pg);
+}
+
+function renderChatDetail(root) {
+  const chat=S.a2aChats.find(c=>c.id===S.curChat);
+  if(!chat){S.curChat=null;renderChats(root);return;}
+  const initial=(chat.name||'?')[0];
+  const isUnmatched = chat.status==='no-match';
+  const pg=el('div',{class:'chat-detail',style:'height:100%;'});
+
+  // Header with "AI分身" badge top-left
+  const hdr=el('div',{class:'cd-header',style:'flex-wrap:wrap;'});
+  hdr.appendChild(el('div',{class:'cd-back',html:'‹',onclick:()=>{S.curChat=null;render();}}));
+  hdr.appendChild(el('div',{class:'cd-ava',style:`background:${isUnmatched?'linear-gradient(135deg,#d1d5db,#9ca3af)':'linear-gradient(135deg,#6c63ff,#a78bfa)'}`,html:initial}));
+  const nameCol=el('div',{});
+  nameCol.appendChild(el('div',{class:'cd-name',html:chat.name}));
+  const subRow=el('div',{style:'display:flex;align-items:center;gap:6px;margin-top:2px;'});
+  subRow.appendChild(el('span',{style:'font-size:10px;font-weight:700;color:#fff;background:linear-gradient(135deg,#3B5BF6,#818cf8);padding:2px 7px;border-radius:8px;',html:'✦ AI分身'}));
+  subRow.appendChild(el('span',{style:'font-size:11px;color:#aaa;',html:chat.sport}));
+  nameCol.appendChild(subRow);
+  hdr.appendChild(nameCol);
+  hdr.appendChild(el('div',{class:'cd-actions'},[el('span',{html:'⋯',onclick:()=>toast('更多选项')})]));
+  pg.appendChild(hdr);
+
+  const msgs=el('div',{class:'cd-msgs',id:'cdMsgs'});
+  (chat.messages||[]).forEach(m=>{
+    if(m.type==='sys'){
+      msgs.appendChild(el('div',{class:'dmsg-sys'},[el('div',{class:'dmsg-sys-tag',html:m.c})]));
+      return;
+    }
+    const isMe=m.type==='mine';
+    const row=el('div',{class:'dmsg-row'+(isMe?' r':'')});
+    if(!isMe){
+      row.appendChild(el('div',{class:'dmsg-ava',style:`background:${isUnmatched?'linear-gradient(135deg,#d1d5db,#9ca3af)':'linear-gradient(135deg,#818cf8,#a78bfa)'}`,html:initial}));
+    }
+    row.appendChild(el('div',{class:'dmsg-bubble',html:m.c.replace(/\n/g,'<br>')}));
+    if(isMe){
+      const myInit=(S.nickname||'我')[0];
+      row.appendChild(el('div',{class:'dmsg-ava',style:'background:linear-gradient(135deg,#3B5BF6,#818cf8)',html:myInit}));
+    }
+    msgs.appendChild(row);
+  });
+  pg.appendChild(msgs);
+  pg.appendChild(el('div',{class:'cd-input-bar'},[
+    el('div',{class:'cd-input',html:'接管对话并发消息...'}),
+    el('button',{class:'cd-send',html:'▲',onclick:()=>toast('分身对话中，点击「接管」可直接发消息（演示）')}),
+  ]));
+  root.appendChild(pg);
+  setTimeout(()=>{const m=$('#cdMsgs');if(m)m.scrollTop=m.scrollHeight;},50);
+}
+</script>
+</body>
+</html>
