@@ -4,11 +4,14 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // User profiles inside a shared pool.
-    // - Read: any signed-in user (so matching can see the pool).
-    // - Write: only the owner can write their own profile.
+    // Identity is a name+PIN-derived account id (not the anonymous auth uid),
+    // so the doc id no longer equals request.auth.uid. Any signed-in user may
+    // create/update a profile doc. This is the accepted trade-off of the
+    // lightweight name+PIN scheme (class-internal use). Tighten before any
+    // real production use.
     match /pools/{poolId}/users/{uid} {
       allow read: if request.auth != null;
-      allow create, update: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null;
       allow delete: if false;
     }
 

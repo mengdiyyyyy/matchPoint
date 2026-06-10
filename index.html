@@ -115,6 +115,10 @@ html,body{
 .splash-brand{font-size:30px;font-weight:800;color:#1a1a2e;margin-bottom:4px;}
 .splash-hero{width:100%;max-width:360px;height:auto;display:block;margin:0 auto 20px;}
 .splash-sub{font-size:14px;color:#888;margin-bottom:44px;text-align:center;}
+.splash-seg{display:flex;width:100%;max-width:360px;background:#f0f1f6;border-radius:12px;padding:4px;margin-bottom:18px;}
+.seg-btn{flex:1;border:none;background:transparent;padding:9px 0;border-radius:9px;font-size:14px;font-weight:600;color:#888;cursor:pointer;}
+.seg-btn.active{background:#fff;color:#1a1a2e;box-shadow:0 1px 3px rgba(0,0,0,.08);}
+.splash-swap{margin-top:12px;border:none;background:transparent;color:#6c5ce7;font-size:14px;font-weight:600;cursor:pointer;}
 .splash-field{width:100%;margin-bottom:14px;}
 .splash-label{font-size:13px;font-weight:600;color:#555;margin-bottom:7px;display:block;}
 .splash-hint{font-size:12px;color:#bbb;margin-top:14px;text-align:center;line-height:1.7;}
@@ -753,6 +757,28 @@ function lsSet(k,v){ localStorage.setItem(k,JSON.stringify(v)); }
 
 function genCode(n=6){ return Math.random().toString(36).slice(2,2+n).toUpperCase(); }
 
+// ---- Name + PIN account identity ----------------------------------------
+// The user's identity is derived deterministically from their name + 4-digit
+// PIN, so the same name+PIN reproduces the same account id on ANY device.
+// The doc id is a one-way hash — the PIN itself is never stored, and you
+// can't recover anyone's PIN from the pool.
+function simpleHash(str){let h=0x811c9dc5;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,0x01000193);}return (h>>>0).toString(16).padStart(8,'0');}
+async function acctId(name,pin){
+  const norm=(name||'').trim().toLowerCase().replace(/\s+/g,'')+'|'+(pin||'');
+  try{
+    const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(norm));
+    return 'acct_'+[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,24);
+  }catch(e){
+    // Fallback for non-secure contexts where crypto.subtle is unavailable.
+    return 'acct_'+simpleHash(norm)+simpleHash(norm+'#mp')+simpleHash('mp#'+norm);
+  }
+}
+// Returns the stored profile object if this account already exists, else null.
+async function acctExists(id){
+  if(db){ try{ const s=await db.collection('pools').doc(POOL_ID).collection('users').doc(id).get(); return s.exists?s.data():null; }catch(e){ console.warn('acctExists read failed:',e);} }
+  return ls('mp_profile_'+id);
+}
+
 // Save current user profile to pool
 async function saveProfile() {
   const profile = buildProfileObj();
@@ -846,6 +872,7 @@ const initialUid = FIREBASE_ENABLED
 
 const S = {
   screen: 'splash',
+  splashMode: 'login', authReady: false, authUid: '',
   tab: 'ai', autoFindStarted: false, unmatchedOpen: false,
   scanProgress: null, // {current,total,name} when scanning, null when idle
   scanCompleted: false,
@@ -888,30 +915,51 @@ if (initialUid) loadProfileForUid(initialUid);
 // On first load (or after sign-out) we trigger signInAnonymously() so every
 // visitor gets a real Firebase UID that Firestore rules can authorize.
 // The user only ever sees the nickname splash — there's no login screen.
+// Anonymous auth still runs in the background — it's what authorizes Firestore
+// reads/writes (the security rules require request.auth != null). But the app's
+// IDENTITY is now the name+PIN account, decoupled from the anon uid. The anon
+// uid is kept only as S.authUid so we know auth is ready.
 function attachAuthListener() {
   if (!FIREBASE_ENABLED || !auth) return;
   auth.onAuthStateChanged(async user => {
     if (user) {
-      S.uid = user.uid;
-      // Pull authoritative profile from Firestore if it exists, else fall back to local.
-      try {
-        const snap = await db.collection('pools').doc(POOL_ID).collection('users').doc(user.uid).get();
-        if (snap.exists) lsSet('mp_profile_'+user.uid, snap.data());
-      } catch(e) { console.warn('profile fetch failed:', e); }
-      loadProfileForUid(user.uid);
+      S.authUid = user.uid;
+      S.authReady = true;
+      await restoreSession();
       S.poolCount = await getPoolCount();
       render();
     } else {
       // No user yet — kick off anonymous sign-in. Listener re-fires when it lands.
       try { await auth.signInAnonymously(); }
       catch(e) {
-        console.warn('Anonymous sign-in failed:', e);
-        // Surface a clear message so the presenter knows to enable Anonymous
-        // sign-in in the Firebase Console.
-        setTimeout(()=>toast('Firebase 匿名登录未启用，请在 Console → Authentication → Sign-in method 里开启 Anonymous'), 100);
+        console.warn('Anonymous sign-in failed, falling back to local-only mode:', e);
+        // RELIABILITY FALLBACK: if Anonymous sign-in isn't enabled in the Console,
+        // degrade to pure-localStorage mode so register/login still works on this
+        // device (cross-device login just won't sync until the cloud is enabled).
+        db = null;
+        S.authReady = true;
+        await restoreSession();
+        S.poolCount = await getPoolCount();
+        render();
+        setTimeout(()=>toast('云端未启用，已切换本地模式（仅本设备）'), 100);
       }
     }
   });
+}
+
+// Restore the last account that signed in ON THIS DEVICE (name+PIN identity).
+// Returning users skip the splash; new devices land on the splash to log in.
+async function restoreSession() {
+  const remembered = ls('mp_current_acct');
+  if (!remembered) { S.screen = 'splash'; return; }
+  if (db) {
+    try {
+      const snap = await db.collection('pools').doc(POOL_ID).collection('users').doc(remembered).get();
+      if (snap.exists) lsSet('mp_profile_'+remembered, snap.data());
+    } catch(e) { console.warn('profile fetch failed:', e); }
+  }
+  S.uid = remembered;
+  loadProfileForUid(remembered);
 }
 
 // Production: pool is built from real registrations only — no virtual classmate seeding.
@@ -1002,18 +1050,61 @@ document.addEventListener('DOMContentLoaded',()=>{
 // SPLASH
 // ============================================================
 function renderSplash(root) {
+  if (!S.splashMode) S.splashMode = 'login';
+  const reg = S.splashMode === 'register';
   const pg=el('div',{class:'splash slide-up'});
   pg.appendChild(el('img',{class:'splash-hero',src:'matchpoint-logo.webp',alt:'Matchpoint'}));
   pg.appendChild(el('div',{class:'splash-sub',html:'填写真实运动数据 · AI 分身替你找搭子'}));
 
-  pg.appendChild(el('div',{class:'splash-field'},[el('label',{class:'splash-label',html:'你的昵称'}),el('input',{class:'text-inp',placeholder:'输入你的名字',type:'text',id:'splashName'})]));
-  pg.appendChild(el('button',{class:'btn',onclick:()=>{
-    const n=$('#splashName')?.value?.trim(); if(!n)return;
-    S.nickname=n; startOB();
-  }},'开始填写 →'));
-  pg.appendChild(el('div',{class:'splash-hint',html:'约 3 分钟 · 填完后 AI 分身自动帮你在班级里找搭子'}));
+  const seg=el('div',{class:'splash-seg'});
+  seg.appendChild(el('button',{class:'seg-btn'+(reg?' active':''),onclick:()=>{S.splashMode='register';render();}},'注册'));
+  seg.appendChild(el('button',{class:'seg-btn'+(!reg?' active':''),onclick:()=>{S.splashMode='login';render();}},'登录'));
+  pg.appendChild(seg);
+
+  pg.appendChild(el('div',{class:'splash-field'},[el('label',{class:'splash-label',html:'你的姓名'}),el('input',{class:'text-inp',placeholder:'输入你的名字',type:'text',id:'splashName',value:S.nickname||''})]));
+  pg.appendChild(el('div',{class:'splash-field'},[el('label',{class:'splash-label',html:reg?'设置 4 位 PIN 码（请牢记，用于换设备登录）':'你的 4 位 PIN 码'}),el('input',{class:'text-inp',placeholder:'4 位数字',type:'text',inputmode:'numeric',maxlength:'4',id:'splashPin'})]));
+
+  const btn=el('button',{class:'btn'}, reg?'注册并开始填档案 →':'登录');
+  btn.addEventListener('click', reg?doRegister:doLogin);
+  pg.appendChild(btn);
+
+  // Secondary action: switch between login and register.
+  const swap=el('button',{class:'splash-swap',onclick:()=>{S.splashMode=reg?'login':'register';render();}},
+    reg?'已有账号？返回登录':'还没有账号？点这里注册');
+  pg.appendChild(swap);
+
+  pg.appendChild(el('div',{class:'splash-hint',html: reg?'约 3 分钟 · 填完后 AI 分身自动帮你在班级里找搭子':'用注册时的姓名和 PIN 登录，换手机也能找回档案'}));
   root.appendChild(pg);
   setTimeout(()=>$('#splashName')?.focus(),80);
+}
+
+function splashInputs(){
+  const n=$('#splashName')?.value?.trim();
+  const p=$('#splashPin')?.value?.trim();
+  if(!n){ toast('请输入姓名'); return null; }
+  if(!/^\d{4}$/.test(p)){ toast('PIN 必须是 4 位数字'); return null; }
+  if(FIREBASE_ENABLED && db && !S.authReady){ toast('正在连接云端，请稍候…'); return null; }
+  return {n,p};
+}
+
+async function doRegister(){
+  const inp=splashInputs(); if(!inp) return;
+  const id=await acctId(inp.n,inp.p);
+  if(await acctExists(id)){ toast('该姓名+PIN 已存在，请直接登录'); S.splashMode='login'; S.nickname=inp.n; render(); return; }
+  S.uid=id; S.nickname=inp.n; lsSet('mp_current_acct',id);
+  startOB();
+}
+
+async function doLogin(){
+  const inp=splashInputs(); if(!inp) return;
+  const id=await acctId(inp.n,inp.p);
+  const existing=await acctExists(id);
+  if(!existing){ toast('没找到账号，请检查姓名和 PIN，或先去注册'); return; }
+  lsSet('mp_profile_'+id, existing);
+  S.uid=id; lsSet('mp_current_acct',id);
+  loadProfileForUid(id);
+  S.poolCount=await getPoolCount();
+  render();
 }
 
 function startOB() { S.screen='onboarding'; S.obStep='sport-select'; render(); }
@@ -1316,14 +1407,11 @@ function renderMe(root) {
       render();
     }),
   ];
-  if (FIREBASE_ENABLED && auth?.currentUser) {
-    meRows.push(buildMR('🔄','重新注册（新身份）',async ()=>{
-      if(!confirm('重新注册会清空本设备的本地数据并申请一个新 UID。已写入活动池的旧档案不会被自动删除。')) return;
-      try { await auth.signOut(); } catch(e) { console.warn(e); }
-      Object.keys(localStorage).filter(k=>k.startsWith('mp_')).forEach(k=>localStorage.removeItem(k));
-      // Auth listener will fire signInAnonymously() automatically.
-    }));
-  }
+  meRows.push(buildMR('🚪','退出登录 / 切换账号',async ()=>{
+    if(!confirm('退出当前账号？你的档案已存在云端，用同样的姓名和 PIN 可随时重新登录。')) return;
+    localStorage.removeItem('mp_current_acct');
+    location.reload();
+  }));
   pg.appendChild(el('div',{class:'me-rows'}, meRows));
   pg.appendChild(el('div',{style:'height:28px;'}));
   root.appendChild(pg);
