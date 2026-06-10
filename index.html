@@ -115,9 +115,7 @@ html,body{
 .splash-brand{font-size:30px;font-weight:800;color:#1a1a2e;margin-bottom:4px;}
 .splash-hero{width:100%;max-width:360px;height:auto;display:block;margin:0 auto 20px;}
 .splash-sub{font-size:14px;color:#888;margin-bottom:44px;text-align:center;}
-.splash-seg{display:flex;width:100%;max-width:360px;background:#f0f1f6;border-radius:12px;padding:4px;margin-bottom:18px;}
-.seg-btn{flex:1;border:none;background:transparent;padding:9px 0;border-radius:9px;font-size:14px;font-weight:600;color:#888;cursor:pointer;}
-.seg-btn.active{background:#fff;color:#1a1a2e;box-shadow:0 1px 3px rgba(0,0,0,.08);}
+.splash-title{width:100%;max-width:360px;font-size:20px;font-weight:800;color:#1a1a2e;margin-bottom:16px;text-align:center;}
 .splash-swap{margin-top:12px;border:none;background:transparent;color:#6c5ce7;font-size:14px;font-weight:600;cursor:pointer;}
 .splash-field{width:100%;margin-bottom:14px;}
 .splash-label{font-size:13px;font-weight:600;color:#555;margin-bottom:7px;display:block;}
@@ -816,11 +814,50 @@ async function getPoolCount() {
 
 async function saveA2AChat(chat) {
   S.a2aChats.unshift(chat);
+  pruneChats();
   lsSet('mp_chats_'+S.uid, S.a2aChats);
   if (db) {
     try { await db.collection('pools').doc(POOL_ID).collection('chats').doc(chat.id).set(chat); }
     catch(e){}
   }
+}
+
+// Keep at most MAX_CHATS conversations per user; drop the oldest by timestamp.
+// Chats the user owns are also removed from the cloud so they don't re-sync.
+const MAX_CHATS = 15;
+function pruneChats() {
+  if (!S.a2aChats || S.a2aChats.length <= MAX_CHATS) return;
+  S.a2aChats.sort((a,b)=>(b.ts||0)-(a.ts||0));
+  const drop = S.a2aChats.slice(MAX_CHATS);
+  S.a2aChats = S.a2aChats.slice(0, MAX_CHATS);
+  drop.forEach(c=>{ if (db && c.id && c.ownerUid===S.uid) { try { db.collection('pools').doc(POOL_ID).collection('chats').doc(c.id).delete(); } catch(e){} } });
+}
+
+// Pull every chat this account takes part in (as initiator OR recipient) from
+// the cloud, so chats survive re-login and show up for BOTH matched people.
+async function loadCloudChats() {
+  if (!db || !S.uid) return;
+  try {
+    const snap = await db.collection('pools').doc(POOL_ID).collection('chats')
+      .where('participants','array-contains',S.uid).get();
+    const byId = {};
+    (S.a2aChats||[]).forEach(c=>{ byId[c.id]=c; });
+    snap.docs.forEach(d=>{ const c=d.data(); if(c&&c.id) byId[c.id]=c; });
+    S.a2aChats = Object.values(byId);
+    pruneChats();
+    lsSet('mp_chats_'+S.uid, S.a2aChats);
+  } catch(e) { console.warn('loadCloudChats failed:', e); }
+}
+
+// The other person in a chat, from the CURRENT user's point of view.
+function chatCounterpartName(chat) {
+  if (chat.ownerUid && chat.peerUid)
+    return chat.ownerUid===S.uid ? (chat.peerName||chat.name) : (chat.ownerName||chat.name);
+  return chat.name; // legacy chats
+}
+// True when the current user is the recipient — their/mine bubbles must swap.
+function chatIsFlipped(chat) {
+  return !!(chat.ownerUid && chat.peerUid && chat.peerUid===S.uid && chat.ownerUid!==S.uid);
 }
 
 function buildProfileObj() {
@@ -960,6 +997,7 @@ async function restoreSession() {
   }
   S.uid = remembered;
   loadProfileForUid(remembered);
+  await loadCloudChats();
 }
 
 // Production: pool is built from real registrations only — no virtual classmate seeding.
@@ -1056,10 +1094,7 @@ function renderSplash(root) {
   pg.appendChild(el('img',{class:'splash-hero',src:'matchpoint-logo.webp',alt:'Matchpoint'}));
   pg.appendChild(el('div',{class:'splash-sub',html:'填写真实运动数据 · AI 分身替你找搭子'}));
 
-  const seg=el('div',{class:'splash-seg'});
-  seg.appendChild(el('button',{class:'seg-btn'+(reg?' active':''),onclick:()=>{S.splashMode='register';render();}},'注册'));
-  seg.appendChild(el('button',{class:'seg-btn'+(!reg?' active':''),onclick:()=>{S.splashMode='login';render();}},'登录'));
-  pg.appendChild(seg);
+  pg.appendChild(el('div',{class:'splash-title',html:reg?'注册':'登录'}));
 
   pg.appendChild(el('div',{class:'splash-field'},[el('label',{class:'splash-label',html:'你的姓名'}),el('input',{class:'text-inp',placeholder:'输入你的名字',type:'text',id:'splashName',value:S.nickname||''})]));
   pg.appendChild(el('div',{class:'splash-field'},[el('label',{class:'splash-label',html:reg?'设置 4 位 PIN 码（请牢记，用于换设备登录）':'你的 4 位 PIN 码'}),el('input',{class:'text-inp',placeholder:'4 位数字',type:'text',inputmode:'numeric',maxlength:'4',id:'splashPin'})]));
@@ -1103,6 +1138,7 @@ async function doLogin(){
   lsSet('mp_profile_'+id, existing);
   S.uid=id; lsSet('mp_current_acct',id);
   loadProfileForUid(id);
+  await loadCloudChats();
   S.poolCount=await getPoolCount();
   render();
 }
@@ -1546,6 +1582,8 @@ async function sendInvite(user, score, shared, sportKey) {
 
   const chat = {
     id: chatId, uid: user.uid, name: user.nickname,
+    ownerUid:S.uid, ownerName:S.nickname, peerUid:user.uid, peerName:user.nickname,
+    participants:[S.uid, user.uid], ts:Date.now(),
     sport: sp.e+' '+sp.n, sportKeys:[sportKey], score, shared,
     status: 'confirmed', unread: 1,
     timeAgo: '刚刚',
@@ -1860,10 +1898,12 @@ async function autoFindForSport(me, sportKey, focusHint) {
     const theirSportData = (user.sports||[]).find(s=>s.key===sportKey)||{key:sportKey,answers:[]};
     const a2aMsgs = buildA2AConversation(myProfile.nickname, user.nickname, sp, mySportData, theirSportData, myProfile, user);
 
-    // Weighted-score decision (out of 10). >=5 → main list; <5 → minimized.
+    // Weighted-score decision (out of 10). >=5 → main list; 2–5 → minimized
+    // (greyed/collapsed); <2 → too poor a fit, don't create a chat at all.
     const score10 = a2aMsgs.__score10 || 0;
     const score100 = Math.round(score10 * 10);  // 0-100 scale for color intensity
     const aboveThreshold = score10 >= 5;
+    if (score10 < 2 && !existing) { continue; }
 
     const lastText = a2aMsgs.filter(m=>m.type==='mine'||m.type==='their').slice(-1)[0]?.c || '';
 
@@ -1877,6 +1917,8 @@ async function autoFindForSport(me, sportKey, focusHint) {
       existing.sport = labels.join(' · ');
       existing.preview = lastText.slice(0,40)+(lastText.length>40?'…':'');
       existing.timeAgo = '刚刚';
+      existing.ts = Date.now();
+      if (!existing.participants) { existing.ownerUid=S.uid; existing.ownerName=S.nickname; existing.peerUid=user.uid; existing.peerName=user.nickname; existing.participants=[S.uid, user.uid]; }
       if (aboveThreshold) existing.unread = (existing.unread||0)+1;
       if (score100 > (existing.score||0)) { existing.score = score100; existing.matchPercent = score10; }
       if (aboveThreshold && existing.status === 'no-match') existing.status = 'confirmed';
@@ -1890,6 +1932,8 @@ async function autoFindForSport(me, sportKey, focusHint) {
       const chat = {
         id:'c_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
         uid:user.uid, name:user.nickname,
+        ownerUid:S.uid, ownerName:S.nickname, peerUid:user.uid, peerName:user.nickname,
+        participants:[S.uid, user.uid], ts:Date.now(),
         sport:sp.e+' '+sp.n, sportKeys:[sportKey],
         score: score100, matchPercent: score10, shared,
         status: aboveThreshold ? 'confirmed' : 'no-match',
@@ -2048,7 +2092,8 @@ function matchRingColor(score) {
 }
 
 function buildChatItem(chat, idx, gradients, opts={}) {
-  const initial=(chat.name||'?')[0];
+  const cpName=chatCounterpartName(chat);
+  const initial=(cpName||'?')[0];
   const item=el('div',{class:'chat-item',onclick:()=>{chat.unread=0;S.curChat=chat.id;render();}});
   // Avatar — no match color here (moved to right side)
   const aw=el('div',{class:'ci-ava-wrap'});
@@ -2057,7 +2102,7 @@ function buildChatItem(chat, idx, gradients, opts={}) {
   item.appendChild(aw);
   // Info column
   const info=el('div',{class:'ci-info'});
-  info.appendChild(el('div',{class:'ci-row1'},[el('div',{class:'ci-name',html:chat.name}),el('div',{class:'ci-time',html:chat.timeAgo})]));
+  info.appendChild(el('div',{class:'ci-row1'},[el('div',{class:'ci-name',html:cpName}),el('div',{class:'ci-time',html:chat.timeAgo})]));
   info.appendChild(el('div',{class:'ci-msg',html:chat.preview}));
   info.appendChild(el('div',{class:'ci-badges'},[
     el('div',{class:'ci-badge a2a',html:'✦ AI分身'}),
@@ -2133,7 +2178,9 @@ function renderChats(root) {
 function renderChatDetail(root) {
   const chat=S.a2aChats.find(c=>c.id===S.curChat);
   if(!chat){S.curChat=null;renderChats(root);return;}
-  const initial=(chat.name||'?')[0];
+  const cpName=chatCounterpartName(chat);
+  const initial=(cpName||'?')[0];
+  const flip=chatIsFlipped(chat);
   const isUnmatched = chat.status==='no-match';
   const pg=el('div',{class:'chat-detail'+(isUnmatched?' unmatched':''),style:'height:100%;'});
 
@@ -2142,7 +2189,7 @@ function renderChatDetail(root) {
   hdr.appendChild(el('div',{class:'cd-back',html:'‹',onclick:()=>{S.curChat=null;render();}}));
   hdr.appendChild(el('div',{class:'cd-ava',style:`background:${isUnmatched?'linear-gradient(135deg,#d1d5db,#9ca3af)':'linear-gradient(135deg,#6c63ff,#a78bfa)'}`,html:initial}));
   const nameCol=el('div',{});
-  nameCol.appendChild(el('div',{class:'cd-name',html:chat.name,style:isUnmatched?'color:#6b7280;':''}));
+  nameCol.appendChild(el('div',{class:'cd-name',html:cpName,style:isUnmatched?'color:#6b7280;':''}));
   const subRow=el('div',{style:'display:flex;align-items:center;gap:6px;margin-top:2px;'});
   const badgeBg = isUnmatched ? '#9ca3af' : 'linear-gradient(135deg,#3B5BF6,#818cf8)';
   subRow.appendChild(el('span',{style:`font-size:10px;font-weight:700;color:#fff;background:${badgeBg};padding:2px 7px;border-radius:8px;`,html:'✦ AI分身'}));
@@ -2158,7 +2205,7 @@ function renderChatDetail(root) {
       msgs.appendChild(el('div',{class:'dmsg-sys'},[el('div',{class:'dmsg-sys-tag',html:m.c})]));
       return;
     }
-    const isMe=m.type==='mine';
+    const isMe = flip ? (m.type==='their') : (m.type==='mine');
     const row=el('div',{class:'dmsg-row'+(isMe?' r':'')});
     if(!isMe){
       row.appendChild(el('div',{class:'dmsg-ava',style:`background:${isUnmatched?'linear-gradient(135deg,#d1d5db,#9ca3af)':'linear-gradient(135deg,#818cf8,#a78bfa)'}`,html:initial}));
