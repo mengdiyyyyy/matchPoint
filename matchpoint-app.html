@@ -112,6 +112,7 @@ html,body{
 .splash{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100%;padding:40px 28px;background:#fff;}
 .splash-logo{font-size:52px;margin-bottom:8px;}
 .splash-brand{font-size:30px;font-weight:800;color:#1a1a2e;margin-bottom:4px;}
+.splash-hero{width:100%;max-width:360px;height:auto;display:block;margin:0 auto 20px;}
 .splash-sub{font-size:14px;color:#888;margin-bottom:44px;text-align:center;}
 .splash-field{width:100%;margin-bottom:14px;}
 .splash-label{font-size:13px;font-weight:600;color:#555;margin-bottom:7px;display:block;}
@@ -292,6 +293,12 @@ html,body{
 .cd-input-bar{padding:10px 16px 14px;background:#fff;border-top:1px solid #f0f0f5;display:flex;gap:10px;align-items:center;flex-shrink:0;}
 .cd-input{flex:1;padding:9px 14px;background:#f4f6ff;border:none;border-radius:22px;font-size:14px;color:#aaa;outline:none;}
 .cd-send{width:36px;height:36px;border-radius:50%;background:#3B5BF6;border:none;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;}
+
+/* No-match chat detail — muted "archive" look */
+.chat-detail.unmatched .dmsg-row.r .dmsg-bubble{background:#d1d5db;color:#4b5563;}
+.chat-detail.unmatched .dmsg-bubble{background:#f0f0f5;color:#6b7280;}
+.chat-detail.unmatched .dmsg-sys-tag{background:#ececf2;color:#9ca3af;}
+.cd-archived-bar{padding:14px 16px;background:#fafafb;border-top:1px solid #f0f0f5;font-size:12px;color:#9ca3af;text-align:center;line-height:1.6;flex-shrink:0;}
 
 /* Firebase setup banner */
 .setup-banner{margin:12px 16px;padding:14px 16px;background:#fffbeb;border:1.5px solid #fcd34d;border-radius:14px;font-size:12px;color:#92400e;line-height:1.7;}
@@ -983,13 +990,8 @@ document.addEventListener('DOMContentLoaded',()=>{
 // ============================================================
 function renderSplash(root) {
   const pg=el('div',{class:'splash slide-up'});
-  pg.appendChild(el('div',{class:'splash-logo',html:'🎾'}));
-  pg.appendChild(el('div',{class:'splash-brand',html:'Matchpoint'}));
+  pg.appendChild(el('img',{class:'splash-hero',src:'matchpoint-logo.webp',alt:'Matchpoint'}));
   pg.appendChild(el('div',{class:'splash-sub',html:'填写真实运动数据 · AI 分身替你找搭子'}));
-
-  if (!FIREBASE_ENABLED) {
-    pg.appendChild(el('div',{class:'firebase-notice',html:'💡 <strong>演示模式</strong>（仅本设备）<br>如需40人真实跨设备匹配，在代码顶部填入 Firebase 配置。<br><a href="https://console.firebase.google.com/" target="_blank">→ Firebase 控制台（免费）</a>'}));
-  }
 
   pg.appendChild(el('div',{class:'splash-field'},[el('label',{class:'splash-label',html:'你的昵称'}),el('input',{class:'text-inp',placeholder:'输入你的名字',type:'text',id:'splashName'})]));
   pg.appendChild(el('button',{class:'btn',onclick:()=>{
@@ -1447,7 +1449,7 @@ async function sendInvite(user, score, shared, sportKey) {
 
   const chat = {
     id: chatId, uid: user.uid, name: user.nickname,
-    sport: sp.e+' '+sp.n, score, shared,
+    sport: sp.e+' '+sp.n, sportKeys:[sportKey], score, shared,
     status: 'confirmed', unread: 1,
     timeAgo: '刚刚',
     preview: a2aMessages[a2aMessages.length-1]?.c||'分身已发出邀约',
@@ -1738,6 +1740,8 @@ async function autoFindForSport(me, sportKey, focusHint) {
   const perStepMs = Math.max(150, Math.floor(MIN_SCAN_MS / Math.max(1, candidates.length)));
 
   let matched = 0;
+  let skippedDup = 0;   // 同人 + 同运动：直接跳过
+  let mergedMulti = 0;  // 同人 + 新运动：合并到原 conversation
   try {
   for (let i = 0; i < candidates.length; i++) {
     const {user, score, shared, sportKey} = candidates[i];
@@ -1746,6 +1750,12 @@ async function autoFindForSport(me, sportKey, focusHint) {
     render();
     // Pace the scan — fill at least MIN_SCAN_MS regardless of candidate count
     await new Promise(r => setTimeout(r, perStepMs));
+
+    // DEDUP: existing chat for the same person?
+    const existing = S.a2aChats.find(c => c.uid === user.uid);
+    const existingSportKeys = existing ? (existing.sportKeys || []) : [];
+    // Same person + same sport → skip entirely (no new agent chat).
+    if (existingSportKeys.includes(sportKey)) { skippedDup++; continue; }
 
     // Note: `sp` is the outer-scope sport already resolved before the loop.
     const myProfile = buildProfileObj();
@@ -1759,18 +1769,41 @@ async function autoFindForSport(me, sportKey, focusHint) {
     const aboveThreshold = score10 >= 5;
 
     const lastText = a2aMsgs.filter(m=>m.type==='mine'||m.type==='their').slice(-1)[0]?.c || '';
-    const chat = {
-      id:'c_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
-      uid:user.uid, name:user.nickname,
-      sport:sp.e+' '+sp.n, score: score100, matchPercent: score10, shared,
-      status: aboveThreshold ? 'confirmed' : 'no-match',
-      unread: aboveThreshold ? 1 : 0,
-      timeAgo:'刚刚',
-      preview: lastText.slice(0,40)+(lastText.length>40?'…':''),
-      messages: a2aMsgs,
-    };
-    await saveA2AChat(chat);
-    if (aboveThreshold) matched++;
+
+    if (existing) {
+      // Same person + new sport → append to the existing conversation.
+      existing.messages = existing.messages || [];
+      existing.messages.push({type:'sys', c:`换个运动聊聊 — ${sp.e} ${sp.n}`});
+      existing.messages.push(...a2aMsgs);
+      existing.sportKeys = [...existingSportKeys, sportKey];
+      const labels = existing.sportKeys.map(k=>{const s=SPORTS.find(x=>x.key===k)||{e:'🎾',n:k};return s.e+' '+s.n;});
+      existing.sport = labels.join(' · ');
+      existing.preview = lastText.slice(0,40)+(lastText.length>40?'…':'');
+      existing.timeAgo = '刚刚';
+      if (aboveThreshold) existing.unread = (existing.unread||0)+1;
+      if (score100 > (existing.score||0)) { existing.score = score100; existing.matchPercent = score10; }
+      if (aboveThreshold && existing.status === 'no-match') existing.status = 'confirmed';
+      // Bump to top of the list.
+      S.a2aChats = [existing, ...S.a2aChats.filter(c => c !== existing)];
+      lsSet('mp_chats_'+S.uid, S.a2aChats);
+      if (db) { try { await db.collection('pools').doc(POOL_ID).collection('chats').doc(existing.id).set(existing); } catch(e){} }
+      mergedMulti++;
+      if (aboveThreshold) matched++;
+    } else {
+      const chat = {
+        id:'c_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),
+        uid:user.uid, name:user.nickname,
+        sport:sp.e+' '+sp.n, sportKeys:[sportKey],
+        score: score100, matchPercent: score10, shared,
+        status: aboveThreshold ? 'confirmed' : 'no-match',
+        unread: aboveThreshold ? 1 : 0,
+        timeAgo:'刚刚',
+        preview: lastText.slice(0,40)+(lastText.length>40?'…':''),
+        messages: a2aMsgs,
+      };
+      await saveA2AChat(chat);
+      if (aboveThreshold) matched++;
+    }
   }
   } catch (e) {
     // Loop error — log, but still go through cleanup so the island doesn't get stuck.
@@ -1787,10 +1820,15 @@ async function autoFindForSport(me, sportKey, focusHint) {
 
   // Always offer "去看看" button so the user can browse what the agents discussed —
   // even when no one cleared 5/10, the minimized chats reveal why each候选 didn't fit.
-  if (matched === 0) {
-    S.aiMsgs.push({type:'ai', c:`分身和每位 ${sp.e} ${sp.n} 同学都聊过了，目前还没找到 5 分以上的同频朋友。可以去看看分身的对话记录，了解大家差在哪。`, button:'去看看'});
+  const newScans = candidates.length - skippedDup;
+  if (newScans === 0) {
+    S.aiMsgs.push({type:'ai', c:`${sp.e} ${sp.n} 这边的同学之前都已经聊过了，没有新的人可以扫。换个运动试试？`, button:'去看看'});
+  } else if (matched === 0) {
+    const mergedNote = mergedMulti > 0 ? `（其中 ${mergedMulti} 位是在原 conversation 上继续聊的）` : '';
+    S.aiMsgs.push({type:'ai', c:`分身和每位 ${sp.e} ${sp.n} 同学都聊过了${mergedNote}，目前还没找到 5 分以上的同频朋友。可以去看看分身的对话记录，了解大家差在哪。`, button:'去看看'});
   } else {
-    S.aiMsgs.push({type:'ai', c:`你的 ${sp.e} ${sp.n} 同频朋友的分身已经聊完了。`, button:'去看看'});
+    const mergedNote = mergedMulti > 0 ? `（${mergedMulti} 位老朋友的对话已在原 conversation 里续上了 ${sp.e} ${sp.n}）` : '';
+    S.aiMsgs.push({type:'ai', c:`你的 ${sp.e} ${sp.n} 同频朋友的分身已经聊完了。${mergedNote}`, button:'去看看'});
   }
   // Fade out the island; stay on AI page so the user reads the bubble and decides to tap.
   S.scanProgress = null;
@@ -2000,16 +2038,17 @@ function renderChatDetail(root) {
   if(!chat){S.curChat=null;renderChats(root);return;}
   const initial=(chat.name||'?')[0];
   const isUnmatched = chat.status==='no-match';
-  const pg=el('div',{class:'chat-detail',style:'height:100%;'});
+  const pg=el('div',{class:'chat-detail'+(isUnmatched?' unmatched':''),style:'height:100%;'});
 
   // Header with "AI分身" badge top-left
   const hdr=el('div',{class:'cd-header',style:'flex-wrap:wrap;'});
   hdr.appendChild(el('div',{class:'cd-back',html:'‹',onclick:()=>{S.curChat=null;render();}}));
   hdr.appendChild(el('div',{class:'cd-ava',style:`background:${isUnmatched?'linear-gradient(135deg,#d1d5db,#9ca3af)':'linear-gradient(135deg,#6c63ff,#a78bfa)'}`,html:initial}));
   const nameCol=el('div',{});
-  nameCol.appendChild(el('div',{class:'cd-name',html:chat.name}));
+  nameCol.appendChild(el('div',{class:'cd-name',html:chat.name,style:isUnmatched?'color:#6b7280;':''}));
   const subRow=el('div',{style:'display:flex;align-items:center;gap:6px;margin-top:2px;'});
-  subRow.appendChild(el('span',{style:'font-size:10px;font-weight:700;color:#fff;background:linear-gradient(135deg,#3B5BF6,#818cf8);padding:2px 7px;border-radius:8px;',html:'✦ AI分身'}));
+  const badgeBg = isUnmatched ? '#9ca3af' : 'linear-gradient(135deg,#3B5BF6,#818cf8)';
+  subRow.appendChild(el('span',{style:`font-size:10px;font-weight:700;color:#fff;background:${badgeBg};padding:2px 7px;border-radius:8px;`,html:'✦ AI分身'}));
   subRow.appendChild(el('span',{style:'font-size:11px;color:#aaa;',html:chat.sport}));
   nameCol.appendChild(subRow);
   hdr.appendChild(nameCol);
@@ -2030,15 +2069,20 @@ function renderChatDetail(root) {
     row.appendChild(el('div',{class:'dmsg-bubble',html:m.c.replace(/\n/g,'<br>')}));
     if(isMe){
       const myInit=(S.nickname||'我')[0];
-      row.appendChild(el('div',{class:'dmsg-ava',style:'background:linear-gradient(135deg,#3B5BF6,#818cf8)',html:myInit}));
+      const myAvaBg = isUnmatched ? 'linear-gradient(135deg,#d1d5db,#9ca3af)' : 'linear-gradient(135deg,#3B5BF6,#818cf8)';
+      row.appendChild(el('div',{class:'dmsg-ava',style:`background:${myAvaBg}`,html:myInit}));
     }
     msgs.appendChild(row);
   });
   pg.appendChild(msgs);
-  pg.appendChild(el('div',{class:'cd-input-bar'},[
-    el('div',{class:'cd-input',html:'接管对话并发消息...'}),
-    el('button',{class:'cd-send',html:'▲',onclick:()=>toast('分身对话中，点击「接管」可直接发消息（演示）')}),
-  ]));
+  if (isUnmatched) {
+    pg.appendChild(el('div',{class:'cd-archived-bar',html:`暂不同频 · 综合 ${chat.matchPercent||0}/10 分 — 仅保留分身对话记录，不发消息`}));
+  } else {
+    pg.appendChild(el('div',{class:'cd-input-bar'},[
+      el('div',{class:'cd-input',html:'接管对话并发消息...'}),
+      el('button',{class:'cd-send',html:'▲',onclick:()=>toast('分身对话中，点击「接管」可直接发消息（演示）')}),
+    ]));
+  }
   root.appendChild(pg);
   setTimeout(()=>{const m=$('#cdMsgs');if(m)m.scrollTop=m.scrollHeight;},50);
 }
