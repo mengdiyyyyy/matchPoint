@@ -866,44 +866,8 @@ if (saved) {
   S.screen = 'main';
 }
 
-// ============================================================
-// CLASSMATE BULK-IMPORT — fetch classmates-pool.json once and seed
-// the local pool. Runs only if the pool is empty (so users can also
-// add themselves via normal onboarding without conflicts).
-// ============================================================
-async function seedClassmatesPool() {
-  // Mark flag once loaded to avoid re-fetching on every reload
-  if (ls('mp_classmates_loaded') === true) return;
-  try {
-    const resp = await fetch('./classmates-pool.json', {cache: 'no-store'});
-    if (!resp.ok) return;
-    const classmates = await resp.json();
-    if (!Array.isArray(classmates) || classmates.length === 0) return;
-
-    if (db) {
-      // Firestore path: write each user (skip if exists is fine for demo)
-      for (const u of classmates) {
-        try { await db.collection('pools').doc(POOL_ID).collection('users').doc(u.uid).set(u); } catch(e){}
-      }
-    } else {
-      // localStorage path: merge into mp_pool_users (de-dup by uid)
-      const existing = ls('mp_pool_users') || [];
-      const have = new Set(existing.map(u => u.uid));
-      const merged = [...existing, ...classmates.filter(u => !have.has(u.uid))];
-      lsSet('mp_pool_users', merged);
-    }
-    lsSet('mp_classmates_loaded', true);
-    console.log(`[Matchpoint] seeded ${classmates.length} classmates into pool`);
-    // Refresh pool count in state
-    S.poolCount = await getPoolCount();
-    if (S.screen === 'main') render();
-  } catch (e) {
-    console.warn('[Matchpoint] classmates-pool.json not available:', e.message);
-  }
-}
-
-// Load pool count in background and seed classmates if available
-seedClassmatesPool().then(() => getPoolCount()).then(n => { S.poolCount = n; if (S.screen==='main') render(); });
+// Production: pool is built from real registrations only — no virtual classmate seeding.
+getPoolCount().then(n => { S.poolCount = n; if (S.screen==='main') render(); });
 
 // ============================================================
 // UTILS
@@ -996,7 +960,7 @@ function renderSplash(root) {
   pg.appendChild(el('div',{class:'splash-field'},[el('label',{class:'splash-label',html:'你的昵称'}),el('input',{class:'text-inp',placeholder:'输入你的名字',type:'text',id:'splashName'})]));
   pg.appendChild(el('button',{class:'btn',onclick:()=>{
     const n=$('#splashName')?.value?.trim(); if(!n)return;
-    S.nickname=n; seedLocalPool(); startOB();
+    S.nickname=n; startOB();
   }},'开始填写 →'));
   pg.appendChild(el('div',{class:'splash-hint',html:'约 3 分钟 · 填完后 AI 分身自动帮你在班级里找搭子'}));
   root.appendChild(pg);
@@ -1005,17 +969,7 @@ function renderSplash(root) {
 
 function startOB() { S.screen='onboarding'; S.obStep='sport-select'; render(); }
 
-// Pre-seed local pool for demo (when Firebase not configured)
-function seedLocalPool() {
-  if ((ls('mp_pool_users')||[]).length > 0) return;
-  lsSet('mp_pool_users', [
-    {uid:'d1',nickname:'小雨',sports:[{key:'tennis',answers:[{q:'在哪里打网球？',a:'朝阳公园'},{q:'偏好单打还是双打？',a:'单打'},{q:'NTRP水平？',a:'3.0-3.5'},{q:'有球场资源？',a:'偶尔有'}]},{key:'badminton',answers:[{q:'一般在哪里打羽毛球？',a:'朝阳区'},{q:'偏好单打还是双打？',a:'双打'},{q:'水平大概是？',a:'进阶'},{q:'约局缺几人？',a:'缺1人'}]}],timePref:{days:['周末'],times:['下午']},updatedAt:Date.now()-3600000},
-    {uid:'d2',nickname:'Alex',sports:[{key:'basketball',answers:[{q:'在哪里打篮球？',a:'国贸篮球馆'},{q:'偏好几人制？',a:'5V5'},{q:'打球强度偏好？',a:'认真竞技'}]},{key:'tennis',answers:[{q:'在哪里打网球？',a:'朝阳公园'},{q:'偏好单打还是双打？',a:'单打'},{q:'NTRP水平？',a:'3.5-4.0'},{q:'有球场资源？',a:'有'}]}],timePref:{days:['周中'],times:['晚上']},updatedAt:Date.now()-7200000},
-    {uid:'d3',nickname:'晴天',sports:[{key:'running',answers:[{q:'在哪里跑步？',a:'奥森公园'},{q:'配速大概？',a:'5-6分'},{q:'跑多少公里？',a:'5-10km'}]},{key:'badminton',answers:[{q:'一般在哪里打羽毛球？',a:'朝阳区'},{q:'偏好单打还是双打？',a:'单打'},{q:'水平大概是？',a:'入门'},{q:'约局缺几人？',a:'缺1人'}]}],timePref:{days:['周末'],times:['上午']},updatedAt:Date.now()-10800000},
-    {uid:'d4',nickname:'Lion',sports:[{key:'skiing',answers:[{q:'偏好哪个雪场？',a:'崇礼系'},{q:'雪道难度？',a:'红道'},{q:'装备状况？',a:'全套自有'},{q:'愿意过夜？',a:'是'},{q:'愿意拼车？',a:'是'}]}],timePref:{days:['周末'],times:['上午']},updatedAt:Date.now()-14400000},
-    {uid:'d5',nickname:'Mini',sports:[{key:'yoga',answers:[{q:'在哪里上课？',a:'三里屯瑜伽馆'},{q:'课程类型？',a:'流瑜伽'},{q:'强度偏好？',a:'中等强度'},{q:'新手友好需求？',a:'有基础'}]},{key:'swimming',answers:[{q:'在哪里游泳？',a:'国家游泳中心'},{q:'偏好泳道？',a:'中速道'},{q:'主要泳姿？',a:'自由泳'},{q:'游泳目标？',a:'提升技术'}]}],timePref:{days:['周中','周末'],times:['下午']},updatedAt:Date.now()-18000000},
-  ]);
-}
+// Production: no virtual seeding. Pool is populated entirely by real registrations.
 
 // ============================================================
 // ONBOARDING
@@ -1304,15 +1258,11 @@ function renderMe(root) {
     ]),
   ]));
   pg.appendChild(el('div',{class:'me-rows'},[
-    buildMR('🔄','重置活动池（测试）',async ()=>{
-      if(!confirm('清空活动池里的同学数据并重新加载 classmates-pool.json？')) return;
-      localStorage.removeItem('mp_pool_users');
-      localStorage.removeItem('mp_classmates_loaded');
+    buildMR('🧹','清空我的聊天记录',async ()=>{
+      if(!confirm('清空你自己的分身对话历史？（不会影响活动池里其他人）')) return;
       localStorage.removeItem('mp_chats_'+S.uid);
       S.a2aChats=[]; S.autoFindStarted=false;
-      await seedClassmatesPool();
-      S.poolCount = await getPoolCount();
-      toast(`已重置，活动池现有 ${S.poolCount} 人`);
+      toast('已清空聊天记录');
       render();
     }),
   ]));
