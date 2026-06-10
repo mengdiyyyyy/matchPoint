@@ -1,0 +1,4 @@
+[[redirects]]
+  from = "/"
+  to = "/matchpoint-app.html"
+  status = 200
