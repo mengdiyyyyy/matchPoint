@@ -118,8 +118,6 @@ html,body{
 .splash-field{width:100%;margin-bottom:14px;}
 .splash-label{font-size:13px;font-weight:600;color:#555;margin-bottom:7px;display:block;}
 .splash-hint{font-size:12px;color:#bbb;margin-top:14px;text-align:center;line-height:1.7;}
-.login-err{font-size:12px;color:#dc2626;margin:6px 2px 8px;line-height:1.5;}
-.btn-secondary{width:100%;padding:12px;background:#f4f6ff;color:#3B5BF6;font-size:14px;font-weight:600;border:none;border-radius:14px;cursor:pointer;margin-top:10px;}
 .divider{display:flex;align-items:center;gap:12px;margin:14px 0;color:#ddd;font-size:12px;}
 .divider::before,.divider::after{content:'';flex:1;height:1px;background:#eee;}
 .room-row{display:flex;gap:10px;margin-bottom:14px;}
@@ -749,9 +747,6 @@ function initFirebase() {
   } catch(e) { console.warn('Firebase init failed:', e); db = null; auth = null; }
 }
 
-// Auth state — phone-login flow uses these
-let confirmationResult = null; // SMS verification handle
-let recaptchaVerifier = null;
 
 function ls(k){ try{return JSON.parse(localStorage.getItem(k));}catch{return null;} }
 function lsSet(k,v){ localStorage.setItem(k,JSON.stringify(v)); }
@@ -843,22 +838,19 @@ function calcScore(me, other) {
 // ============================================================
 // STATE
 // ============================================================
-// Initial uid: when Firebase is enabled, wait for Auth (uid filled in by listener).
+// Initial uid: when Firebase is enabled, wait for Auth (anon sign-in fills uid via listener).
 // Without Firebase, fall back to a local-generated id so the demo still works offline.
 const initialUid = FIREBASE_ENABLED
   ? ''
   : (ls('mp_uid') || (()=>{ const id='u_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); lsSet('mp_uid',id); return id; })());
 
 const S = {
-  screen: FIREBASE_ENABLED ? 'phone-login' : 'splash',
+  screen: 'splash',
   tab: 'ai', autoFindStarted: false, unmatchedOpen: false,
   scanProgress: null, // {current,total,name} when scanning, null when idle
   scanCompleted: false,
   aiPendingSearch: null, // {sportKey} after profile analysis, waiting for user's focus reply
   uid: initialUid,
-  phoneNumber: '', // populated after phone-login
-  loginStep: 'enter-phone', // 'enter-phone' | 'enter-code' | 'sending' | 'verifying'
-  loginError: '',
   nickname: '', obStep: 'sport-select',
   selectedSports: [], curSportKey: null, sportProg: {}, pendingText: '',
   timePref: { days:[], times:[] },
@@ -892,30 +884,32 @@ function loadProfileForUid(uid) {
 
 if (initialUid) loadProfileForUid(initialUid);
 
-// Firebase Auth state listener — call AFTER initFirebase() so `auth` is set.
+// Firebase Auth state listener — anonymous auth.
+// On first load (or after sign-out) we trigger signInAnonymously() so every
+// visitor gets a real Firebase UID that Firestore rules can authorize.
+// The user only ever sees the nickname splash — there's no login screen.
 function attachAuthListener() {
   if (!FIREBASE_ENABLED || !auth) return;
   auth.onAuthStateChanged(async user => {
     if (user) {
       S.uid = user.uid;
-      S.phoneNumber = user.phoneNumber || '';
       // Pull authoritative profile from Firestore if it exists, else fall back to local.
       try {
         const snap = await db.collection('pools').doc(POOL_ID).collection('users').doc(user.uid).get();
-        if (snap.exists) {
-          const p = snap.data();
-          lsSet('mp_profile_'+user.uid, p);
-        }
+        if (snap.exists) lsSet('mp_profile_'+user.uid, snap.data());
       } catch(e) { console.warn('profile fetch failed:', e); }
       loadProfileForUid(user.uid);
       S.poolCount = await getPoolCount();
       render();
     } else {
-      // Logged out (or never logged in)
-      S.uid = '';
-      S.screen = 'phone-login';
-      S.loginStep = 'enter-phone';
-      render();
+      // No user yet — kick off anonymous sign-in. Listener re-fires when it lands.
+      try { await auth.signInAnonymously(); }
+      catch(e) {
+        console.warn('Anonymous sign-in failed:', e);
+        // Surface a clear message so the presenter knows to enable Anonymous
+        // sign-in in the Firebase Console.
+        setTimeout(()=>toast('Firebase 匿名登录未启用，请在 Console → Authentication → Sign-in method 里开启 Anonymous'), 100);
+      }
     }
   });
 }
@@ -953,8 +947,7 @@ setInterval(tickClock,30000); tickClock();
 function render() {
   const pc=$('#pageContainer'), tb=$('#tabBar');
   pc.innerHTML='';
-  if (S.screen==='phone-login') { tb.style.display='none'; renderPhoneLogin(pc); }
-  else if (S.screen==='splash') { tb.style.display='none'; renderSplash(pc); }
+  if (S.screen==='splash') { tb.style.display='none'; renderSplash(pc); }
   else if (S.screen==='onboarding') { tb.style.display='none'; renderOB(pc); }
   else {
     tb.style.display='flex';
@@ -1027,91 +1020,6 @@ function startOB() { S.screen='onboarding'; S.obStep='sport-select'; render(); }
 
 // Production: no virtual seeding. Pool is populated entirely by real registrations.
 
-// ============================================================
-// PHONE LOGIN (Firebase Auth)
-// ============================================================
-function renderPhoneLogin(root) {
-  const pg=el('div',{class:'splash slide-up'});
-  pg.appendChild(el('img',{class:'splash-hero',src:'matchpoint-logo.webp',alt:'Matchpoint'}));
-  pg.appendChild(el('div',{class:'splash-sub',html:'手机号登录 · 注册后自动进入活动池'}));
-
-  if (S.loginStep === 'enter-phone' || S.loginStep === 'sending') {
-    pg.appendChild(el('div',{class:'splash-field'},[
-      el('label',{class:'splash-label',html:'手机号（含国家代码）'}),
-      el('input',{class:'text-inp',placeholder:'+86 13800138000',type:'tel',id:'phoneInput',value:S.phoneNumber||''}),
-    ]));
-    pg.appendChild(el('div',{id:'recaptchaContainer',style:'margin:8px 0;'}));
-    if (S.loginError) pg.appendChild(el('div',{class:'login-err',html:S.loginError}));
-    pg.appendChild(el('button',{class:'btn',id:'sendCodeBtn',onclick:sendVerificationCode},
-      S.loginStep==='sending'?'发送中...':'发送验证码'));
-    pg.appendChild(el('div',{class:'splash-hint',html:'演示阶段可在 Firebase 控制台预设测试号码（不会真发短信）'}));
-    setTimeout(()=>{
-      $('#phoneInput')?.focus();
-      // (Re)build invisible reCAPTCHA — Firebase requires this be tied to a visible DOM node
-      if (auth && !recaptchaVerifier) {
-        try {
-          recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptchaContainer', {size:'invisible'});
-        } catch(e) { console.warn('recaptcha init failed', e); }
-      }
-    }, 60);
-  } else if (S.loginStep === 'enter-code' || S.loginStep === 'verifying') {
-    pg.appendChild(el('div',{class:'splash-field'},[
-      el('label',{class:'splash-label',html:`验证码（已发往 ${S.phoneNumber}）`}),
-      el('input',{class:'text-inp',placeholder:'6 位验证码',type:'tel',inputmode:'numeric',id:'codeInput',maxlength:'6'}),
-    ]));
-    if (S.loginError) pg.appendChild(el('div',{class:'login-err',html:S.loginError}));
-    pg.appendChild(el('button',{class:'btn',onclick:confirmVerificationCode},
-      S.loginStep==='verifying'?'登录中...':'确认登录'));
-    pg.appendChild(el('button',{class:'btn-secondary',onclick:()=>{S.loginStep='enter-phone';S.loginError='';render();}},'换个号码'));
-  }
-  root.appendChild(pg);
-}
-
-async function sendVerificationCode() {
-  if (S.loginStep === 'sending') return;
-  const raw = $('#phoneInput')?.value?.trim();
-  if (!raw) { S.loginError='请输入手机号'; render(); return; }
-  // Normalize: if user typed bare digits, default to +86
-  const phone = raw.startsWith('+') ? raw : '+86' + raw.replace(/\D/g,'');
-  S.phoneNumber = phone; S.loginError = ''; S.loginStep = 'sending'; render();
-  try {
-    confirmationResult = await auth.signInWithPhoneNumber(phone, recaptchaVerifier);
-    S.loginStep = 'enter-code'; render();
-  } catch(e) {
-    console.warn('SMS send failed', e);
-    S.loginError = '发送失败：' + (e.message || e.code || '请检查手机号格式');
-    S.loginStep = 'enter-phone';
-    // Reset reCAPTCHA so user can retry
-    try { recaptchaVerifier?.clear(); } catch(_){}
-    recaptchaVerifier = null;
-    render();
-  }
-}
-
-async function confirmVerificationCode() {
-  if (S.loginStep === 'verifying' || !confirmationResult) return;
-  const code = $('#codeInput')?.value?.trim();
-  if (!code) { S.loginError='请输入验证码'; render(); return; }
-  S.loginError = ''; S.loginStep = 'verifying'; render();
-  try {
-    const cred = await confirmationResult.confirm(code);
-    const user = cred.user;
-    // Stamp a minimal user record in Firestore so the pool has an entry immediately
-    try {
-      await db.collection('pools').doc(POOL_ID).collection('users').doc(user.uid).set({
-        uid: user.uid,
-        phoneNumber: user.phoneNumber || S.phoneNumber,
-        createdAt: Date.now(),
-      }, {merge: true});
-    } catch(e) { console.warn('initial profile stub write failed', e); }
-    // Auth state listener handles the screen transition.
-  } catch(e) {
-    console.warn('code confirm failed', e);
-    S.loginError = '验证失败：' + (e.message || e.code || '验证码错误');
-    S.loginStep = 'enter-code';
-    render();
-  }
-}
 
 // ============================================================
 // ONBOARDING
@@ -1409,12 +1317,11 @@ function renderMe(root) {
     }),
   ];
   if (FIREBASE_ENABLED && auth?.currentUser) {
-    meRows.push(buildMR('🚪','退出登录',async ()=>{
-      if(!confirm('退出后需要重新用手机号登录，本设备的本地缓存也会清空。')) return;
+    meRows.push(buildMR('🔄','重新注册（新身份）',async ()=>{
+      if(!confirm('重新注册会清空本设备的本地数据并申请一个新 UID。已写入活动池的旧档案不会被自动删除。')) return;
       try { await auth.signOut(); } catch(e) { console.warn(e); }
-      // Clear local copies so the next user starts clean on this device.
       Object.keys(localStorage).filter(k=>k.startsWith('mp_')).forEach(k=>localStorage.removeItem(k));
-      // Auth listener will route to phone-login.
+      // Auth listener will fire signInAnonymously() automatically.
     }));
   }
   pg.appendChild(el('div',{class:'me-rows'}, meRows));
