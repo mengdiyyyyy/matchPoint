@@ -816,7 +816,7 @@ async function getPoolCount() {
 }
 
 async function saveA2AChat(chat) {
-  S.a2aChats.unshift(chat);
+  S.a2aChats = mergeChatList([chat, ...(S.a2aChats||[])]);
   pruneChats();
   lsSet('mp_chats_'+S.uid, S.a2aChats);
   if (db) {
@@ -843,10 +843,8 @@ async function loadCloudChats() {
   try {
     const snap = await db.collection('pools').doc(POOL_ID).collection('chats')
       .where('participants','array-contains',S.uid).get();
-    const byId = {};
-    (S.a2aChats||[]).forEach(c=>{ byId[c.id]=c; });
-    snap.docs.forEach(d=>{ const c=d.data(); if(c&&c.id) byId[c.id]=c; });
-    S.a2aChats = Object.values(byId);
+    const cloudChats = snap.docs.map(d=>d.data()).filter(c=>c&&c.id);
+    S.a2aChats = mergeChatList([...(S.a2aChats||[]), ...cloudChats]);
     pruneChats();
     lsSet('mp_chats_'+S.uid, S.a2aChats);
   } catch(e) { console.warn('loadCloudChats failed:', e); }
@@ -867,12 +865,10 @@ function attachChatsListener() {
       .where('participants','array-contains',myUid)
       .onSnapshot(snap=>{
         if (S.uid !== myUid) return; // account switched; ignore stale listener
-        const byId = {};
-        (S.a2aChats||[]).forEach(c=>{ byId[c.id]=c; });
-        let added = false;
-        snap.docs.forEach(d=>{ const c=d.data(); if(c&&c.id&&!byId[c.id]){ byId[c.id]=c; added=true; } });
-        if (!added) return;
-        S.a2aChats = Object.values(byId);
+        const beforeSig = chatListSignature(S.a2aChats||[]);
+        const cloudChats = snap.docs.map(d=>d.data()).filter(c=>c&&c.id);
+        S.a2aChats = mergeChatList([...(S.a2aChats||[]), ...cloudChats]);
+        if (chatListSignature(S.a2aChats) === beforeSig) return;
         pruneChats();
         lsSet('mp_chats_'+S.uid, S.a2aChats);
         if (S.screen==='main') render();
@@ -889,6 +885,130 @@ function chatCounterpartName(chat) {
 // True when the current user is the recipient — their/mine bubbles must swap.
 function chatIsFlipped(chat) {
   return !!(chat.ownerUid && chat.peerUid && chat.peerUid===S.uid && chat.ownerUid!==S.uid);
+}
+
+function chatCounterpartUid(chat) {
+  if (!chat) return '';
+  if (chat.ownerUid && chat.peerUid) return chat.ownerUid===S.uid ? chat.peerUid : chat.ownerUid;
+  if (Array.isArray(chat.participants)) {
+    const other = chat.participants.find(uid=>uid && uid!==S.uid);
+    if (other) return other;
+  }
+  if (chat.uid && chat.uid!==S.uid) return chat.uid;
+  if (chat.peerUid && chat.peerUid!==S.uid) return chat.peerUid;
+  if (chat.ownerUid && chat.ownerUid!==S.uid) return chat.ownerUid;
+  return chat.uid || chat.peerUid || chat.ownerUid || '';
+}
+
+function chatConversationKey(chat) {
+  if (!chat) return '';
+  const ids = [];
+  if (Array.isArray(chat.participants)) ids.push(...chat.participants);
+  if (chat.ownerUid) ids.push(chat.ownerUid);
+  if (chat.peerUid) ids.push(chat.peerUid);
+  const uniq = [...new Set(ids.filter(Boolean))];
+  if (uniq.length >= 2) return 'pair:'+uniq.slice(0,2).sort().join('|');
+  const cp = chatCounterpartUid(chat);
+  return cp ? 'peer:'+cp : 'id:'+(chat.id||'');
+}
+
+function chatHasUser(chat, uid) {
+  if (!chat || !uid) return false;
+  if (chat.ownerUid===uid || chat.peerUid===uid) return true;
+  if (Array.isArray(chat.participants) && chat.participants.includes(uid)) return true;
+  return chat.uid===uid && chat.uid!==S.uid;
+}
+
+function findExistingChatForUser(uid) {
+  return (S.a2aChats||[]).find(c=>chatCounterpartUid(c)===uid || chatHasUser(c, uid));
+}
+
+function normalizeMessagesToBase(base, incoming) {
+  const reversed = !!(base?.ownerUid && base?.peerUid && incoming?.ownerUid && incoming?.peerUid &&
+    base.ownerUid===incoming.peerUid && base.peerUid===incoming.ownerUid);
+  return (incoming?.messages||[]).map(m=>{
+    if (!reversed || (m.type!=='mine' && m.type!=='their')) return {...m};
+    return {...m, type:m.type==='mine'?'their':'mine'};
+  });
+}
+
+function uniqueMessagesForChats(base, incoming) {
+  const baseMsgs = (base.messages||[]).map(m=>({...m}));
+  const incomingMsgs = normalizeMessagesToBase(base, incoming);
+  const chunks = (incoming.ts||0) < (base.ts||0) ? [incomingMsgs, baseMsgs] : [baseMsgs, incomingMsgs];
+  const seen = new Set();
+  const out = [];
+  chunks.flat().forEach(m=>{
+    const key = (m.type||'')+'\u001f'+(m.c||'');
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(m);
+  });
+  return out;
+}
+
+function sportLabelFromKeys(keys, fallback) {
+  const labels = (keys||[]).map(k=>{
+    const s = SPORTS.find(x=>x.key===k);
+    return s ? s.e+' '+s.n : k;
+  }).filter(Boolean);
+  return labels.length ? labels.join(' · ') : (fallback || '');
+}
+
+function mergedChatStatus(a, b) {
+  const ranks = {confirmed:3, pending:2, 'no-match':1};
+  return (ranks[b.status]||0) > (ranks[a.status]||0) ? b.status : a.status;
+}
+
+function mergeTwoChats(base, incoming) {
+  if (!base) return {...incoming};
+  if (!incoming) return {...base};
+  const prevMsgCount = (base.messages||[]).length;
+  const prevSportCount = (base.sportKeys||[]).length;
+  const messages = uniqueMessagesForChats(base, incoming);
+  const sportKeys = [...new Set([...(base.sportKeys||[]), ...(incoming.sportKeys||[])])];
+  const latest = (incoming.ts||0) >= (base.ts||0) ? incoming : base;
+  const grew = messages.length > prevMsgCount || sportKeys.length > prevSportCount;
+  const merged = {
+    ...base,
+    ...latest,
+    id: base.id || incoming.id,
+    uid: chatCounterpartUid(base) || chatCounterpartUid(incoming) || base.uid || incoming.uid,
+    ownerUid: base.ownerUid || incoming.ownerUid,
+    ownerName: base.ownerName || incoming.ownerName,
+    peerUid: base.peerUid || incoming.peerUid,
+    peerName: base.peerName || incoming.peerName,
+    participants: [...new Set([...(base.participants||[]), ...(incoming.participants||[])])],
+    sportKeys,
+    sport: sportLabelFromKeys(sportKeys, latest.sport || base.sport),
+    shared: [...new Set([...(base.shared||[]), ...(incoming.shared||[])])],
+    score: Math.max(base.score||0, incoming.score||0),
+    matchPercent: Math.max(base.matchPercent||0, incoming.matchPercent||0),
+    status: mergedChatStatus(base, incoming),
+    ts: Math.max(base.ts||0, incoming.ts||0),
+    timeAgo: latest.timeAgo || base.timeAgo || '刚刚',
+    messages,
+  };
+  const lastText = messages.filter(m=>m.type==='mine'||m.type==='their').slice(-1)[0]?.c || latest.preview || base.preview || '';
+  merged.preview = lastText.slice(0,40)+(lastText.length>40?'…':'');
+  merged.unread = grew ? Math.max(base.unread||0, incoming.unread||0) : (base.unread||0);
+  return merged;
+}
+
+function mergeChatList(chats) {
+  const byKey = {};
+  (chats||[]).filter(c=>c&&c.id).forEach(chat=>{
+    const key = chatConversationKey(chat);
+    byKey[key] = byKey[key] ? mergeTwoChats(byKey[key], chat) : {...chat};
+  });
+  return Object.values(byKey).sort((a,b)=>(b.ts||0)-(a.ts||0));
+}
+
+function chatListSignature(chats) {
+  return (chats||[]).map(c=>[
+    chatConversationKey(c), c.id, c.ts||0, c.status||'', c.unread||0,
+    (c.sportKeys||[]).join(','), (c.messages||[]).length, c.preview||''
+  ].join('|')).sort().join('~');
 }
 
 function buildProfileObj() {
@@ -974,7 +1094,7 @@ function loadProfileForUid(uid) {
   } else {
     S.screen = 'splash';
   }
-  S.a2aChats = ls('mp_chats_'+uid) || [];
+  S.a2aChats = mergeChatList(ls('mp_chats_'+uid) || []);
 }
 
 if (initialUid) loadProfileForUid(initialUid);
@@ -1933,7 +2053,7 @@ async function autoFindForSport(me, sportKey, focusHint) {
     await new Promise(r => setTimeout(r, perStepMs));
 
     // DEDUP: existing chat for the same person?
-    const existing = S.a2aChats.find(c => c.uid === user.uid);
+    const existing = findExistingChatForUser(user.uid);
     const existingSportKeys = existing ? (existing.sportKeys || []) : [];
     // Same person + same sport → skip entirely (no new agent chat).
     if (existingSportKeys.includes(sportKey)) { skippedDup++; continue; }
@@ -1955,23 +2075,23 @@ async function autoFindForSport(me, sportKey, focusHint) {
 
     if (existing) {
       // Same person + new sport → append to the existing conversation.
-      existing.messages = existing.messages || [];
-      existing.messages.push({type:'sys', c:`换个运动聊聊 — ${sp.e} ${sp.n}`});
-      existing.messages.push(...a2aMsgs);
-      existing.sportKeys = [...existingSportKeys, sportKey];
-      const labels = existing.sportKeys.map(k=>{const s=SPORTS.find(x=>x.key===k)||{e:'🎾',n:k};return s.e+' '+s.n;});
-      existing.sport = labels.join(' · ');
-      existing.preview = lastText.slice(0,40)+(lastText.length>40?'…':'');
-      existing.timeAgo = '刚刚';
-      existing.ts = Date.now();
-      if (!existing.participants) { existing.ownerUid=S.uid; existing.ownerName=S.nickname; existing.peerUid=user.uid; existing.peerName=user.nickname; existing.participants=[S.uid, user.uid]; }
-      if (aboveThreshold) existing.unread = (existing.unread||0)+1;
-      if (score100 > (existing.score||0)) { existing.score = score100; existing.matchPercent = score10; }
-      if (aboveThreshold && existing.status === 'no-match') existing.status = 'confirmed';
+      const segment = {
+        id: existing.id, uid:user.uid,
+        ownerUid:S.uid, ownerName:S.nickname, peerUid:user.uid, peerName:user.nickname,
+        participants:[S.uid, user.uid], ts:Date.now(),
+        sport:sp.e+' '+sp.n, sportKeys:[sportKey],
+        score: score100, matchPercent: score10, shared,
+        status: aboveThreshold ? 'confirmed' : 'no-match',
+        unread: aboveThreshold ? 1 : 0,
+        timeAgo:'刚刚',
+        preview: lastText.slice(0,40)+(lastText.length>40?'…':''),
+        messages: [{type:'sys', c:`换个运动聊聊 — ${sp.e} ${sp.n}`}, ...a2aMsgs],
+      };
+      const merged = mergeTwoChats(existing, segment);
       // Bump to top of the list.
-      S.a2aChats = [existing, ...S.a2aChats.filter(c => c !== existing)];
+      S.a2aChats = mergeChatList([merged, ...S.a2aChats.filter(c => c !== existing)]);
       lsSet('mp_chats_'+S.uid, S.a2aChats);
-      if (db) { try { await db.collection('pools').doc(POOL_ID).collection('chats').doc(existing.id).set(existing); } catch(e){} }
+      if (db) { try { await db.collection('pools').doc(POOL_ID).collection('chats').doc(merged.id).set(merged); } catch(e){} }
       mergedMulti++;
       if (aboveThreshold) matched++;
     } else {
