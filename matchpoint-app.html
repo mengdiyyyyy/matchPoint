@@ -6,34 +6,35 @@
 <title>Matchpoint</title>
 
 <!-- ============================================================
-  FIREBASE SETUP — 免费，40人绰绰有余
+  FIREBASE SETUP
+  See FIREBASE_SETUP.md for one-time Console steps (authorized domains,
+  Phone provider, test numbers, Firestore rules).
 
-  步骤（5分钟）：
-  1. 打开 https://console.firebase.google.com/
-  2. 新建项目（随便起名）→ 点「</> 网页」→ 复制 firebaseConfig
-  3. Firestore Database → 创建数据库（测试模式）
-  4. 把下面 FIREBASE_CONFIG 里的值替换成你的
+  Web config below is intentionally public — Firebase web config is not a
+  secret. Real protection comes from Firestore security rules + Auth.
 
-  Firestore 安全规则（测试模式自动允许，无需额外设置）
-  免费套餐：50,000 读/天，20,000 写/天，40人完全够用
+  To swap in env vars later (Vite / Netlify build), see FIREBASE_SETUP.md.
   ============================================================ -->
 <script>
   const FIREBASE_CONFIG = {
-    apiKey: "",
-    authDomain: "",
-    projectId: "",
-    storageBucket: "",
-    messagingSenderId: "",
-    appId: ""
+    apiKey: "AIzaSyBtXA1nU24ojwGZ4BW5BaaGAqw3QW3QDUU",
+    authDomain: "matchpoint-e7abe.firebaseapp.com",
+    projectId: "matchpoint-e7abe",
+    storageBucket: "matchpoint-e7abe.firebasestorage.app",
+    messagingSenderId: "295644227588",
+    appId: "1:295644227588:web:dfcba0e06ff646e2b26d51",
+    measurementId: "G-8ZLPSWRWDG"
   };
   // 所有打开此页面的人自动进入同一个池（班级/活动名称，可自定义）
   const POOL_ID = "matchpoint_class_01";
   const FIREBASE_ENABLED = !!FIREBASE_CONFIG.apiKey;
 </script>
 <script>
-  // Load Firebase only if configured
-  if (window.FIREBASE_ENABLED) {
+  // Load Firebase only if configured. `const FIREBASE_ENABLED` from the previous
+  // script tag lives in the shared script scope (not on window) — reference it directly.
+  if (FIREBASE_ENABLED) {
     document.write('<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"><\/script>');
+    document.write('<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"><\/script>');
     document.write('<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"><\/script>');
   }
 </script>
@@ -117,6 +118,8 @@ html,body{
 .splash-field{width:100%;margin-bottom:14px;}
 .splash-label{font-size:13px;font-weight:600;color:#555;margin-bottom:7px;display:block;}
 .splash-hint{font-size:12px;color:#bbb;margin-top:14px;text-align:center;line-height:1.7;}
+.login-err{font-size:12px;color:#dc2626;margin:6px 2px 8px;line-height:1.5;}
+.btn-secondary{width:100%;padding:12px;background:#f4f6ff;color:#3B5BF6;font-size:14px;font-weight:600;border:none;border-radius:14px;cursor:pointer;margin-top:10px;}
 .divider{display:flex;align-items:center;gap:12px;margin:14px 0;color:#ddd;font-size:12px;}
 .divider::before,.divider::after{content:'';flex:1;height:1px;background:#eee;}
 .room-row{display:flex;gap:10px;margin-bottom:14px;}
@@ -735,14 +738,20 @@ const SPORT_STATS = {
 // STORAGE (Firebase if configured, else localStorage)
 // ============================================================
 let db = null;
+let auth = null;
 function initFirebase() {
   if (!FIREBASE_ENABLED) return;
   try {
     firebase.initializeApp(FIREBASE_CONFIG);
     db = firebase.firestore();
+    auth = firebase.auth();
     console.log('Firebase connected');
-  } catch(e) { console.warn('Firebase init failed:', e); db = null; }
+  } catch(e) { console.warn('Firebase init failed:', e); db = null; auth = null; }
 }
+
+// Auth state — phone-login flow uses these
+let confirmationResult = null; // SMS verification handle
+let recaptchaVerifier = null;
 
 function ls(k){ try{return JSON.parse(localStorage.getItem(k));}catch{return null;} }
 function lsSet(k,v){ localStorage.setItem(k,JSON.stringify(v)); }
@@ -754,7 +763,7 @@ async function saveProfile() {
   const profile = buildProfileObj();
   lsSet('mp_profile_'+S.uid, profile);
   if (db) {
-    try { await db.collection('pools').doc(POOL_ID).collection('users').doc(S.uid).set(profile); }
+    try { await db.collection('pools').doc(POOL_ID).collection('users').doc(S.uid).set(profile, {merge: true}); }
     catch(e){ console.warn('Firestore write failed:', e); }
   } else {
     const users = ls('mp_pool_users') || [];
@@ -834,19 +843,29 @@ function calcScore(me, other) {
 // ============================================================
 // STATE
 // ============================================================
+// Initial uid: when Firebase is enabled, wait for Auth (uid filled in by listener).
+// Without Firebase, fall back to a local-generated id so the demo still works offline.
+const initialUid = FIREBASE_ENABLED
+  ? ''
+  : (ls('mp_uid') || (()=>{ const id='u_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); lsSet('mp_uid',id); return id; })());
+
 const S = {
-  screen: 'splash', tab: 'ai', autoFindStarted: false, unmatchedOpen: false,
+  screen: FIREBASE_ENABLED ? 'phone-login' : 'splash',
+  tab: 'ai', autoFindStarted: false, unmatchedOpen: false,
   scanProgress: null, // {current,total,name} when scanning, null when idle
   scanCompleted: false,
   aiPendingSearch: null, // {sportKey} after profile analysis, waiting for user's focus reply
-  uid: ls('mp_uid') || (()=>{ const id='u_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); lsSet('mp_uid',id); return id; })(),
+  uid: initialUid,
+  phoneNumber: '', // populated after phone-login
+  loginStep: 'enter-phone', // 'enter-phone' | 'enter-code' | 'sending' | 'verifying'
+  loginError: '',
   nickname: '', obStep: 'sport-select',
   selectedSports: [], curSportKey: null, sportProg: {}, pendingText: '',
   timePref: { days:[], times:[] },
   meSportTab: null, poolCount: 0,
   curChat: null,
   aiMsgs: [],
-  a2aChats: ls('mp_chats_'+(ls('mp_uid')||'')) || [],
+  a2aChats: initialUid ? (ls('mp_chats_'+initialUid) || []) : [],
 };
 
 // AI page initial state
@@ -855,55 +874,54 @@ S.aiMsgs = [
   { type:'ai', c:'Hi！我是你的运动分身 ✦\n\n你想找哪个运动的同频朋友？告诉我运动名，我先结合你的档案分析你想找的画像，再带着重点去和合适的人一一聊。' },
 ];
 
-// Load saved profile
-const saved = ls('mp_profile_'+S.uid);
-if (saved) {
-  S.nickname = saved.nickname || '';
-  S.selectedSports = (saved.sports||[]).map(s=>s.key);
-  S.sportProg = Object.fromEntries((saved.sports||[]).map(s=>[s.key,{answers:s.answers||[],complete:true}]));
-  S.timePref = saved.timePref || {days:[],times:[]};
-  S.meSportTab = S.selectedSports[0]||null;
-  S.screen = 'main';
-}
-
-// ============================================================
-// CLASSMATE BULK-IMPORT — fetch classmates-pool.json once and seed
-// the local pool. Runs only if the pool is empty (so users can also
-// add themselves via normal onboarding without conflicts).
-// ============================================================
-async function seedClassmatesPool() {
-  // Mark flag once loaded to avoid re-fetching on every reload
-  if (ls('mp_classmates_loaded') === true) return;
-  try {
-    const resp = await fetch('./classmates-pool.json', {cache: 'no-store'});
-    if (!resp.ok) return;
-    const classmates = await resp.json();
-    if (!Array.isArray(classmates) || classmates.length === 0) return;
-
-    if (db) {
-      // Firestore path: write each user (skip if exists is fine for demo)
-      for (const u of classmates) {
-        try { await db.collection('pools').doc(POOL_ID).collection('users').doc(u.uid).set(u); } catch(e){}
-      }
-    } else {
-      // localStorage path: merge into mp_pool_users (de-dup by uid)
-      const existing = ls('mp_pool_users') || [];
-      const have = new Set(existing.map(u => u.uid));
-      const merged = [...existing, ...classmates.filter(u => !have.has(u.uid))];
-      lsSet('mp_pool_users', merged);
-    }
-    lsSet('mp_classmates_loaded', true);
-    console.log(`[Matchpoint] seeded ${classmates.length} classmates into pool`);
-    // Refresh pool count in state
-    S.poolCount = await getPoolCount();
-    if (S.screen === 'main') render();
-  } catch (e) {
-    console.warn('[Matchpoint] classmates-pool.json not available:', e.message);
+// Load saved profile for a given uid — also called after phone-login when uid changes.
+function loadProfileForUid(uid) {
+  const saved = ls('mp_profile_'+uid);
+  if (saved) {
+    S.nickname = saved.nickname || '';
+    S.selectedSports = (saved.sports||[]).map(s=>s.key);
+    S.sportProg = Object.fromEntries((saved.sports||[]).map(s=>[s.key,{answers:s.answers||[],complete:true}]));
+    S.timePref = saved.timePref || {days:[],times:[]};
+    S.meSportTab = S.selectedSports[0]||null;
+    S.screen = 'main';
+  } else {
+    S.screen = 'splash';
   }
+  S.a2aChats = ls('mp_chats_'+uid) || [];
 }
 
-// Load pool count in background and seed classmates if available
-seedClassmatesPool().then(() => getPoolCount()).then(n => { S.poolCount = n; if (S.screen==='main') render(); });
+if (initialUid) loadProfileForUid(initialUid);
+
+// Firebase Auth state listener — call AFTER initFirebase() so `auth` is set.
+function attachAuthListener() {
+  if (!FIREBASE_ENABLED || !auth) return;
+  auth.onAuthStateChanged(async user => {
+    if (user) {
+      S.uid = user.uid;
+      S.phoneNumber = user.phoneNumber || '';
+      // Pull authoritative profile from Firestore if it exists, else fall back to local.
+      try {
+        const snap = await db.collection('pools').doc(POOL_ID).collection('users').doc(user.uid).get();
+        if (snap.exists) {
+          const p = snap.data();
+          lsSet('mp_profile_'+user.uid, p);
+        }
+      } catch(e) { console.warn('profile fetch failed:', e); }
+      loadProfileForUid(user.uid);
+      S.poolCount = await getPoolCount();
+      render();
+    } else {
+      // Logged out (or never logged in)
+      S.uid = '';
+      S.screen = 'phone-login';
+      S.loginStep = 'enter-phone';
+      render();
+    }
+  });
+}
+
+// Production: pool is built from real registrations only — no virtual classmate seeding.
+getPoolCount().then(n => { S.poolCount = n; if (S.screen==='main') render(); });
 
 // ============================================================
 // UTILS
@@ -935,7 +953,8 @@ setInterval(tickClock,30000); tickClock();
 function render() {
   const pc=$('#pageContainer'), tb=$('#tabBar');
   pc.innerHTML='';
-  if (S.screen==='splash') { tb.style.display='none'; renderSplash(pc); }
+  if (S.screen==='phone-login') { tb.style.display='none'; renderPhoneLogin(pc); }
+  else if (S.screen==='splash') { tb.style.display='none'; renderSplash(pc); }
   else if (S.screen==='onboarding') { tb.style.display='none'; renderOB(pc); }
   else {
     tb.style.display='flex';
@@ -979,6 +998,7 @@ function renderDynIsland() {
 
 document.addEventListener('DOMContentLoaded',()=>{
   initFirebase();
+  attachAuthListener();
   $$('#tabBar .tab-item').forEach(item=>{
     item.addEventListener('click',()=>{ const t=item.dataset.tab;if(t!==S.tab){S.tab=t;S.curChat=null;render();} });
   });
@@ -996,7 +1016,7 @@ function renderSplash(root) {
   pg.appendChild(el('div',{class:'splash-field'},[el('label',{class:'splash-label',html:'你的昵称'}),el('input',{class:'text-inp',placeholder:'输入你的名字',type:'text',id:'splashName'})]));
   pg.appendChild(el('button',{class:'btn',onclick:()=>{
     const n=$('#splashName')?.value?.trim(); if(!n)return;
-    S.nickname=n; seedLocalPool(); startOB();
+    S.nickname=n; startOB();
   }},'开始填写 →'));
   pg.appendChild(el('div',{class:'splash-hint',html:'约 3 分钟 · 填完后 AI 分身自动帮你在班级里找搭子'}));
   root.appendChild(pg);
@@ -1005,16 +1025,92 @@ function renderSplash(root) {
 
 function startOB() { S.screen='onboarding'; S.obStep='sport-select'; render(); }
 
-// Pre-seed local pool for demo (when Firebase not configured)
-function seedLocalPool() {
-  if ((ls('mp_pool_users')||[]).length > 0) return;
-  lsSet('mp_pool_users', [
-    {uid:'d1',nickname:'小雨',sports:[{key:'tennis',answers:[{q:'在哪里打网球？',a:'朝阳公园'},{q:'偏好单打还是双打？',a:'单打'},{q:'NTRP水平？',a:'3.0-3.5'},{q:'有球场资源？',a:'偶尔有'}]},{key:'badminton',answers:[{q:'一般在哪里打羽毛球？',a:'朝阳区'},{q:'偏好单打还是双打？',a:'双打'},{q:'水平大概是？',a:'进阶'},{q:'约局缺几人？',a:'缺1人'}]}],timePref:{days:['周末'],times:['下午']},updatedAt:Date.now()-3600000},
-    {uid:'d2',nickname:'Alex',sports:[{key:'basketball',answers:[{q:'在哪里打篮球？',a:'国贸篮球馆'},{q:'偏好几人制？',a:'5V5'},{q:'打球强度偏好？',a:'认真竞技'}]},{key:'tennis',answers:[{q:'在哪里打网球？',a:'朝阳公园'},{q:'偏好单打还是双打？',a:'单打'},{q:'NTRP水平？',a:'3.5-4.0'},{q:'有球场资源？',a:'有'}]}],timePref:{days:['周中'],times:['晚上']},updatedAt:Date.now()-7200000},
-    {uid:'d3',nickname:'晴天',sports:[{key:'running',answers:[{q:'在哪里跑步？',a:'奥森公园'},{q:'配速大概？',a:'5-6分'},{q:'跑多少公里？',a:'5-10km'}]},{key:'badminton',answers:[{q:'一般在哪里打羽毛球？',a:'朝阳区'},{q:'偏好单打还是双打？',a:'单打'},{q:'水平大概是？',a:'入门'},{q:'约局缺几人？',a:'缺1人'}]}],timePref:{days:['周末'],times:['上午']},updatedAt:Date.now()-10800000},
-    {uid:'d4',nickname:'Lion',sports:[{key:'skiing',answers:[{q:'偏好哪个雪场？',a:'崇礼系'},{q:'雪道难度？',a:'红道'},{q:'装备状况？',a:'全套自有'},{q:'愿意过夜？',a:'是'},{q:'愿意拼车？',a:'是'}]}],timePref:{days:['周末'],times:['上午']},updatedAt:Date.now()-14400000},
-    {uid:'d5',nickname:'Mini',sports:[{key:'yoga',answers:[{q:'在哪里上课？',a:'三里屯瑜伽馆'},{q:'课程类型？',a:'流瑜伽'},{q:'强度偏好？',a:'中等强度'},{q:'新手友好需求？',a:'有基础'}]},{key:'swimming',answers:[{q:'在哪里游泳？',a:'国家游泳中心'},{q:'偏好泳道？',a:'中速道'},{q:'主要泳姿？',a:'自由泳'},{q:'游泳目标？',a:'提升技术'}]}],timePref:{days:['周中','周末'],times:['下午']},updatedAt:Date.now()-18000000},
-  ]);
+// Production: no virtual seeding. Pool is populated entirely by real registrations.
+
+// ============================================================
+// PHONE LOGIN (Firebase Auth)
+// ============================================================
+function renderPhoneLogin(root) {
+  const pg=el('div',{class:'splash slide-up'});
+  pg.appendChild(el('img',{class:'splash-hero',src:'matchpoint-logo.webp',alt:'Matchpoint'}));
+  pg.appendChild(el('div',{class:'splash-sub',html:'手机号登录 · 注册后自动进入活动池'}));
+
+  if (S.loginStep === 'enter-phone' || S.loginStep === 'sending') {
+    pg.appendChild(el('div',{class:'splash-field'},[
+      el('label',{class:'splash-label',html:'手机号（含国家代码）'}),
+      el('input',{class:'text-inp',placeholder:'+86 13800138000',type:'tel',id:'phoneInput',value:S.phoneNumber||''}),
+    ]));
+    pg.appendChild(el('div',{id:'recaptchaContainer',style:'margin:8px 0;'}));
+    if (S.loginError) pg.appendChild(el('div',{class:'login-err',html:S.loginError}));
+    pg.appendChild(el('button',{class:'btn',id:'sendCodeBtn',onclick:sendVerificationCode},
+      S.loginStep==='sending'?'发送中...':'发送验证码'));
+    pg.appendChild(el('div',{class:'splash-hint',html:'演示阶段可在 Firebase 控制台预设测试号码（不会真发短信）'}));
+    setTimeout(()=>{
+      $('#phoneInput')?.focus();
+      // (Re)build invisible reCAPTCHA — Firebase requires this be tied to a visible DOM node
+      if (auth && !recaptchaVerifier) {
+        try {
+          recaptchaVerifier = new firebase.auth.RecaptchaVerifier('recaptchaContainer', {size:'invisible'});
+        } catch(e) { console.warn('recaptcha init failed', e); }
+      }
+    }, 60);
+  } else if (S.loginStep === 'enter-code' || S.loginStep === 'verifying') {
+    pg.appendChild(el('div',{class:'splash-field'},[
+      el('label',{class:'splash-label',html:`验证码（已发往 ${S.phoneNumber}）`}),
+      el('input',{class:'text-inp',placeholder:'6 位验证码',type:'tel',inputmode:'numeric',id:'codeInput',maxlength:'6'}),
+    ]));
+    if (S.loginError) pg.appendChild(el('div',{class:'login-err',html:S.loginError}));
+    pg.appendChild(el('button',{class:'btn',onclick:confirmVerificationCode},
+      S.loginStep==='verifying'?'登录中...':'确认登录'));
+    pg.appendChild(el('button',{class:'btn-secondary',onclick:()=>{S.loginStep='enter-phone';S.loginError='';render();}},'换个号码'));
+  }
+  root.appendChild(pg);
+}
+
+async function sendVerificationCode() {
+  if (S.loginStep === 'sending') return;
+  const raw = $('#phoneInput')?.value?.trim();
+  if (!raw) { S.loginError='请输入手机号'; render(); return; }
+  // Normalize: if user typed bare digits, default to +86
+  const phone = raw.startsWith('+') ? raw : '+86' + raw.replace(/\D/g,'');
+  S.phoneNumber = phone; S.loginError = ''; S.loginStep = 'sending'; render();
+  try {
+    confirmationResult = await auth.signInWithPhoneNumber(phone, recaptchaVerifier);
+    S.loginStep = 'enter-code'; render();
+  } catch(e) {
+    console.warn('SMS send failed', e);
+    S.loginError = '发送失败：' + (e.message || e.code || '请检查手机号格式');
+    S.loginStep = 'enter-phone';
+    // Reset reCAPTCHA so user can retry
+    try { recaptchaVerifier?.clear(); } catch(_){}
+    recaptchaVerifier = null;
+    render();
+  }
+}
+
+async function confirmVerificationCode() {
+  if (S.loginStep === 'verifying' || !confirmationResult) return;
+  const code = $('#codeInput')?.value?.trim();
+  if (!code) { S.loginError='请输入验证码'; render(); return; }
+  S.loginError = ''; S.loginStep = 'verifying'; render();
+  try {
+    const cred = await confirmationResult.confirm(code);
+    const user = cred.user;
+    // Stamp a minimal user record in Firestore so the pool has an entry immediately
+    try {
+      await db.collection('pools').doc(POOL_ID).collection('users').doc(user.uid).set({
+        uid: user.uid,
+        phoneNumber: user.phoneNumber || S.phoneNumber,
+        createdAt: Date.now(),
+      }, {merge: true});
+    } catch(e) { console.warn('initial profile stub write failed', e); }
+    // Auth state listener handles the screen transition.
+  } catch(e) {
+    console.warn('code confirm failed', e);
+    S.loginError = '验证失败：' + (e.message || e.code || '验证码错误');
+    S.loginStep = 'enter-code';
+    render();
+  }
 }
 
 // ============================================================
@@ -1303,19 +1399,25 @@ function renderMe(root) {
       el('button',{class:'quick-btn',onclick:()=>{S.tab='chats';render();}},'查看聊天'),
     ]),
   ]));
-  pg.appendChild(el('div',{class:'me-rows'},[
-    buildMR('🔄','重置活动池（测试）',async ()=>{
-      if(!confirm('清空活动池里的同学数据并重新加载 classmates-pool.json？')) return;
-      localStorage.removeItem('mp_pool_users');
-      localStorage.removeItem('mp_classmates_loaded');
+  const meRows = [
+    buildMR('🧹','清空我的聊天记录',async ()=>{
+      if(!confirm('清空你自己的分身对话历史？（不会影响活动池里其他人）')) return;
       localStorage.removeItem('mp_chats_'+S.uid);
       S.a2aChats=[]; S.autoFindStarted=false;
-      await seedClassmatesPool();
-      S.poolCount = await getPoolCount();
-      toast(`已重置，活动池现有 ${S.poolCount} 人`);
+      toast('已清空聊天记录');
       render();
     }),
-  ]));
+  ];
+  if (FIREBASE_ENABLED && auth?.currentUser) {
+    meRows.push(buildMR('🚪','退出登录',async ()=>{
+      if(!confirm('退出后需要重新用手机号登录，本设备的本地缓存也会清空。')) return;
+      try { await auth.signOut(); } catch(e) { console.warn(e); }
+      // Clear local copies so the next user starts clean on this device.
+      Object.keys(localStorage).filter(k=>k.startsWith('mp_')).forEach(k=>localStorage.removeItem(k));
+      // Auth listener will route to phone-login.
+    }));
+  }
+  pg.appendChild(el('div',{class:'me-rows'}, meRows));
   pg.appendChild(el('div',{style:'height:28px;'}));
   root.appendChild(pg);
 }
